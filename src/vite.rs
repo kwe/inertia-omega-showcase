@@ -89,7 +89,9 @@ window.__vite_plugin_react_preamble_installed__ = true;
             .ok()
             .and_then(|json| serde_json::from_str::<HashMap<String, Chunk>>(&json).ok())
         else {
-            tracing::warn!("no Vite manifest: run `npm run build`, or `npm run dev` for the dev server");
+            tracing::warn!(
+                "no Vite manifest: run `npm run build`, or `npm run dev` for the dev server"
+            );
             return String::new();
         };
 
@@ -102,13 +104,22 @@ window.__vite_plugin_react_preamble_installed__ = true;
         for import in &entry.imports {
             if let Some(chunk) = manifest.get(import) {
                 styles.extend(chunk.css.iter().cloned());
-                tags.push(format!(r#"<link rel="modulepreload" href="{}/{}">"#, self.build_url, chunk.file));
+                tags.push(format!(
+                    r#"<link rel="modulepreload" href="{}/{}">"#,
+                    self.build_url, chunk.file
+                ));
             }
         }
         for css in styles {
-            tags.insert(0, format!(r#"<link rel="stylesheet" href="{}/{css}">"#, self.build_url));
+            tags.insert(
+                0,
+                format!(r#"<link rel="stylesheet" href="{}/{css}">"#, self.build_url),
+            );
         }
-        tags.push(format!(r#"<script type="module" src="{}/{}"></script>"#, self.build_url, entry.file));
+        tags.push(format!(
+            r#"<script type="module" src="{}/{}"></script>"#,
+            self.build_url, entry.file
+        ));
 
         tags.join("\n")
     }

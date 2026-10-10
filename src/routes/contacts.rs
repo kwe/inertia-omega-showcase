@@ -18,7 +18,11 @@ pub struct Filters {
 }
 
 /// The list. The search box reloads only the `contacts` and `filters` props.
-pub async fn index(inertia: Inertia, State(db): State<Db>, Query(filters): Query<Filters>) -> inertia::Response {
+pub async fn index(
+    inertia: Inertia,
+    State(db): State<Db>,
+    Query(filters): Query<Filters>,
+) -> inertia::Response {
     inertia.render(
         "Contacts/Index",
         props! {
@@ -44,7 +48,10 @@ pub async fn create(inertia: Inertia) -> inertia::Response {
 pub async fn edit(inertia: Inertia, State(db): State<Db>, Path(id): Path<u64>) -> Response {
     match db.contact(id) {
         Some(contact) => inertia
-            .render("Contacts/Edit", props! { "contact" => contact, "roles" => ROLES })
+            .render(
+                "Contacts/Edit",
+                props! { "contact" => contact, "roles" => ROLES },
+            )
             .into_response(),
         None => not_found_page(&inertia),
     }
@@ -95,13 +102,22 @@ fn validate(db: &Db, form: &ContactForm, except: Option<u64>, full: bool) -> Val
 
 fn is_email(email: &str) -> bool {
     match email.split_once('@') {
-        Some((user, domain)) => !user.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.'),
+        Some((user, domain)) => {
+            !user.is_empty()
+                && domain.contains('.')
+                && !domain.starts_with('.')
+                && !domain.ends_with('.')
+        }
         None => false,
     }
 }
 
 /// `POST /contacts`, from the `<Form>` component on the create page.
-pub async fn store(inertia: Inertia, State(db): State<Db>, Json(form): Json<ContactForm>) -> Response {
+pub async fn store(
+    inertia: Inertia,
+    State(db): State<Db>,
+    Json(form): Json<ContactForm>,
+) -> Response {
     let errors = validate(&db, &form, None, true);
     if !errors.is_empty() {
         // Back to the form; the errors arrive in its `errors` prop.
@@ -117,7 +133,11 @@ pub async fn store(inertia: Inertia, State(db): State<Db>, Json(form): Json<Cont
 /// `POST /contacts/quick`, from the quick-add form on the list. That form
 /// sets an `errorBag`, so its errors are scoped under `errors.quickAdd` and
 /// don't collide with any other form on the page.
-pub async fn quick_store(inertia: Inertia, State(db): State<Db>, Json(form): Json<ContactForm>) -> Response {
+pub async fn quick_store(
+    inertia: Inertia,
+    State(db): State<Db>,
+    Json(form): Json<ContactForm>,
+) -> Response {
     let errors = validate(&db, &form, None, false);
     if !errors.is_empty() {
         return inertia.back_with_errors(errors).into_response();

@@ -1,6 +1,6 @@
 import { Head, Link } from '@inertiajs/react'
 
-export default function Error({ status, message }: { status: number; message: string }) {
+export default function ErrorPage({ status, message }: { status: number; message: string }) {
   return (
     <>
       <Head title={`${status}`} />

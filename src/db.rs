@@ -45,17 +45,56 @@ struct Tables {
 pub struct Db(Arc<Mutex<Tables>>);
 
 const FIRST: [&str; 16] = [
-    "Ada", "Grace", "Linus", "Ferris", "Margaret", "Dennis", "Barbara", "Ken", "Radia", "Guido", "Yukihiro", "Frances",
-    "Bjarne", "Hedy", "Alan", "Katherine",
+    "Ada",
+    "Grace",
+    "Linus",
+    "Ferris",
+    "Margaret",
+    "Dennis",
+    "Barbara",
+    "Ken",
+    "Radia",
+    "Guido",
+    "Yukihiro",
+    "Frances",
+    "Bjarne",
+    "Hedy",
+    "Alan",
+    "Katherine",
 ];
 const LAST: [&str; 12] = [
-    "Lovelace", "Hopper", "Torvalds", "Crab", "Hamilton", "Ritchie", "Liskov", "Thompson", "Perlman", "Rossum",
-    "Matsumoto", "Allen",
+    "Lovelace",
+    "Hopper",
+    "Torvalds",
+    "Crab",
+    "Hamilton",
+    "Ritchie",
+    "Liskov",
+    "Thompson",
+    "Perlman",
+    "Rossum",
+    "Matsumoto",
+    "Allen",
 ];
-const COMPANIES: [&str; 6] = ["Rustacean Labs", "Tokio Works", "Serde & Co", "Hyperion", "Tower Systems", "Crates Inc"];
+const COMPANIES: [&str; 6] = [
+    "Rustacean Labs",
+    "Tokio Works",
+    "Serde & Co",
+    "Hyperion",
+    "Tower Systems",
+    "Crates Inc",
+];
 const ROLES: [&str; 5] = ["Engineer", "Designer", "Founder", "Product", "Support"];
 const TOPICS: [&str; 10] = [
-    "ownership", "borrowing", "lifetimes", "async", "traits", "macros", "generics", "pattern matching", "iterators",
+    "ownership",
+    "borrowing",
+    "lifetimes",
+    "async",
+    "traits",
+    "macros",
+    "generics",
+    "pattern matching",
+    "iterators",
     "error handling",
 ];
 
@@ -72,7 +111,11 @@ impl Db {
             tables.contacts.push(Contact {
                 id: i + 1,
                 name: format!("{first} {last}"),
-                email: format!("{}.{}@example.com", first.to_lowercase(), last.to_lowercase()),
+                email: format!(
+                    "{}.{}@example.com",
+                    first.to_lowercase(),
+                    last.to_lowercase()
+                ),
                 company: COMPANIES[(i as usize * 5) % COMPANIES.len()].to_owned(),
                 role: ROLES[(i as usize * 3) % ROLES.len()].to_owned(),
             });
@@ -95,7 +138,11 @@ impl Db {
         for i in 0..40u64 {
             tables.players.push(Player {
                 id: i + 1,
-                name: format!("{} {}", FIRST[(i as usize * 5) % FIRST.len()], LAST[(i as usize * 3) % LAST.len()]),
+                name: format!(
+                    "{} {}",
+                    FIRST[(i as usize * 5) % FIRST.len()],
+                    LAST[(i as usize * 3) % LAST.len()]
+                ),
                 score: 1000 - i * 20,
                 updated: 0,
             });
@@ -130,14 +177,17 @@ impl Db {
     }
 
     pub fn contact(&self, id: u64) -> Option<Contact> {
-        self.lock().contacts.iter().find(|contact| contact.id == id).cloned()
-    }
-
-    pub fn email_taken(&self, email: &str, except: Option<u64>) -> bool {
         self.lock()
             .contacts
             .iter()
-            .any(|contact| contact.email.eq_ignore_ascii_case(email.trim()) && Some(contact.id) != except)
+            .find(|contact| contact.id == id)
+            .cloned()
+    }
+
+    pub fn email_taken(&self, email: &str, except: Option<u64>) -> bool {
+        self.lock().contacts.iter().any(|contact| {
+            contact.email.eq_ignore_ascii_case(email.trim()) && Some(contact.id) != except
+        })
     }
 
     pub fn create_contact(&self, name: &str, email: &str, company: &str, role: &str) -> Contact {
@@ -154,7 +204,14 @@ impl Db {
         contact
     }
 
-    pub fn update_contact(&self, id: u64, name: &str, email: &str, company: &str, role: &str) -> bool {
+    pub fn update_contact(
+        &self,
+        id: u64,
+        name: &str,
+        email: &str,
+        company: &str,
+        role: &str,
+    ) -> bool {
         let mut tables = self.lock();
         let Some(contact) = tables.contacts.iter_mut().find(|contact| contact.id == id) else {
             return false;
@@ -168,7 +225,10 @@ impl Db {
 
     pub fn delete_contact(&self, id: u64) -> Option<Contact> {
         let mut tables = self.lock();
-        let index = tables.contacts.iter().position(|contact| contact.id == id)?;
+        let index = tables
+            .contacts
+            .iter()
+            .position(|contact| contact.id == id)?;
         Some(tables.contacts.remove(index))
     }
 

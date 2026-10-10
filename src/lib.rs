@@ -37,7 +37,9 @@ pub fn app_with(db: Db, config: Config) -> Router {
         .route("/contacts/quick", post(contacts::quick_store))
         .route(
             "/contacts/{id}",
-            get(contacts::show).put(contacts::update).delete(contacts::destroy),
+            get(contacts::show)
+                .put(contacts::update)
+                .delete(contacts::destroy),
         )
         .route("/contacts/{id}/edit", get(contacts::edit))
         .route("/feed", get(feed::index))
@@ -68,7 +70,7 @@ pub fn app_with(db: Db, config: Config) -> Router {
 pub fn inertia_config() -> Config {
     let vite = Vite::new();
 
-    Config::new()
+    shared_props(Config::new())
         // A new build changes the manifest, and so the version: clients still
         // running the old assets do a full page load on their next visit.
         .version_with({
@@ -94,14 +96,6 @@ pub fn inertia_config() -> Config {
                 body = view.body,
             )
         })
-        // Shared with every page. The lazy prop is only computed when it's
-        // part of the response, so partial reloads that skip it don't pay.
-        .share(|_request| {
-            props! {
-                "app.name" => "Omega Showcase",
-                "app.stack" => inertia::lazy(|| async { "Axum 0.8 · inertia-omega · React 19 · Vite" }),
-            }
-        })
         // First visits are rendered by Node: through the Vite dev server while
         // `npm run dev` runs, or by `npm run ssr` once `npm run build` has
         // built the SSR bundle. If neither is up, the client renders instead.
@@ -110,6 +104,17 @@ pub fn inertia_config() -> Config {
                 .hot_file("public/hot")
                 .bundle("bootstrap/ssr/app.js"),
         )
+}
+
+/// Props shared with every page. The lazy prop is only computed when it's
+/// part of the response, so partial reloads that skip it don't pay for it.
+pub fn shared_props(config: Config) -> Config {
+    config.share(|_request| {
+        props! {
+            "app.name" => "Omega Showcase",
+            "app.stack" => inertia::lazy(|| async { "Axum 0.8 · inertia-omega · React 19 · Vite" }),
+        }
+    })
 }
 
 /// Share the signed-in user with every page, like an auth middleware would.

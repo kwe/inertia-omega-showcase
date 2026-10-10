@@ -11,7 +11,11 @@ pub struct Page {
     page: Option<u64>,
 }
 
-pub async fn index(inertia: Inertia, State(db): State<Db>, Query(query): Query<Page>) -> inertia::Response {
+pub async fn index(
+    inertia: Inertia,
+    State(db): State<Db>,
+    Query(query): Query<Page>,
+) -> inertia::Response {
     let page = query.page.unwrap_or(1);
 
     inertia.render(

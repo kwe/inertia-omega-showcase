@@ -22,6 +22,9 @@ pub async fn index(inertia: Inertia) -> inertia::Response {
 /// with the old key can no longer be restored from the history.
 pub async fn lock(inertia: Inertia) -> Response {
     inertia.clear_history();
-    inertia.flash("toast", "History cleared: the vault can't be restored with the back button.");
+    inertia.flash(
+        "toast",
+        "History cleared: the vault can't be restored with the back button.",
+    );
     inertia::redirect("/").into_response()
 }
