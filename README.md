@@ -67,7 +67,7 @@ Each card in the app has a small orange label naming the Rust API behind it.
 
 And across the whole app:
 
-- **Asset versioning.** The version is a hash of Vite's build manifest (`Config::version_with`, in `src/vite.rs`). To see it work: open the app from a production build, change a page, run `npm run build`, then click a link in the open tab. The server answers `409` with `X-Inertia-Location`, and the browser does a full reload to pick up the new assets. The current version is in the footer. In development it's `dev`, since Vite serves the latest code anyway.
+- **Asset versioning.** The version is a hash of Vite's build manifest (`Config::version_with`, in `src/vite.rs`). To see it work: open the app from a production build, change a page, run `npm run build`, then hover or click a link in the open tab. The server answers `409` with `X-Inertia-Location`, and the browser does a full reload to pick up the new assets. The current version is in the footer. In development it's `dev`, since Vite serves the latest code anyway.
 - **Server-side rendering.** `HttpGateway` with a hot file for development and a bundle check for production. View the page source to see the rendered HTML.
 - **Progress indicator.** The bar at the top of the page during slow visits (`progress` in `app.tsx`).
 - **Page titles.** `<Head title>` plus the `title` callback in `app.tsx`, rendered on the server too.
