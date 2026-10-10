@@ -24,13 +24,16 @@ pub async fn index(
     State(db): State<Db>,
     Query(query): Query<Page>,
 ) -> inertia::Response {
-    let (first, page) = match (query.page, query.upto) {
-        (Some(page), _) => (page.max(1), page.max(1)),
-        (None, Some(upto)) => (1, upto.max(1)),
-        (None, None) => (1, 1),
-    };
     let players = db.players();
     let total = players.len();
+    // Both come from the query string: clamp them to the pages that exist, so
+    // `?upto=18446744073709551615` can't build a huge `loadedPages` or overflow.
+    let last = total.div_ceil(PER_PAGE).max(1);
+    let (first, page) = match (query.page, query.upto) {
+        (Some(page), _) => (page.clamp(1, last), page.clamp(1, last)),
+        (None, Some(upto)) => (1, upto.clamp(1, last)),
+        (None, None) => (1, 1),
+    };
     let start = (first - 1) * PER_PAGE;
     let rows: Vec<_> = players
         .into_iter()
@@ -43,7 +46,7 @@ pub async fn index(
         props! {
             "players" => inertia::merge(rows).match_on("id"),
             "page" => page,
-            "hasMore" => start + PER_PAGE < total,
+            "hasMore" => page < last,
             // Deep merged: the client keeps keys it already has and updates the rest.
             "summary" => inertia::deep_merge(props! {
                 "loadedPages" => (first..=page).map(|page| (page.to_string(), true)).collect::<inertia::Props>(),
@@ -67,5 +70,6 @@ pub async fn play(inertia: Inertia, State(db): State<Db>, Json(play): Json<Play>
         format!("{} players scored this round.", changed.len()),
     );
 
-    inertia::redirect(&format!("/leaderboard?upto={}", play.upto.clamp(1, 10))).into_response()
+    // `index` clamps `upto` to the pages that exist.
+    inertia::redirect(&format!("/leaderboard?upto={}", play.upto)).into_response()
 }

@@ -35,7 +35,14 @@ export default defineConfig(({ command }) => ({
   base: command === 'build' ? '/build/' : '/',
   // Axum serves public/ itself; don't copy it into the build.
   publicDir: false,
-  plugins: [inertia(), react(), tailwindcss(), hotFile()],
+  plugins: [
+    // The production SSR server (`npm run ssr`) binds 0.0.0.0 by default;
+    // only the Axum app on this machine needs to reach it.
+    inertia({ ssr: { entry: 'resources/js/app.tsx', host: '127.0.0.1' } }),
+    react(),
+    tailwindcss(),
+    hotFile(),
+  ],
   resolve: {
     alias: { '@': '/resources/js' },
   },
@@ -43,7 +50,9 @@ export default defineConfig(({ command }) => ({
     port: 5173,
     strictPort: true,
     origin: DEV_URL,
-    cors: true,
+    // Vite's default CORS policy only allows localhost origins, which covers
+    // the Axum app on :3000. `cors: true` would let any website you visit read
+    // your source from the dev server.
   },
   build: {
     manifest: true,

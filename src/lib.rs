@@ -3,9 +3,12 @@
 //! - `db`: the seeded in-memory data.
 //! - `vite`: asset tags and the asset version.
 //! - `routes`: one module per showcase page.
+//! - `csrf`: the `XSRF-TOKEN` cookie and its check on every form submission.
+//! - `session`: an in-memory session store that forgets expired sessions.
 
 use axum::Router;
-use axum::extract::Request;
+use axum::extract::{DefaultBodyLimit, Request};
+use axum::http::{HeaderName, HeaderValue, header};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use axum::routing::{get, post, put};
@@ -13,14 +16,37 @@ use inertia::axum::InertiaLayer;
 use inertia::ssr::HttpGateway;
 use inertia::{Config, Inertia, View, props};
 use tower_http::services::ServeDir;
-use tower_sessions::{MemoryStore, SessionManagerLayer};
+use tower_http::set_header::SetResponseHeaderLayer;
+use tower_sessions::cookie::time::Duration;
+use tower_sessions::{Expiry, SessionManagerLayer};
 
+pub mod csrf;
 pub mod db;
 pub mod routes;
+pub mod session;
 pub mod vite;
 
+use crate::csrf::SecureCookies;
 use crate::db::Db;
+use crate::session::PruningMemoryStore;
 use crate::vite::Vite;
+
+/// Form bodies are a few hundred bytes; axum's default limit is 2 MB.
+const BODY_LIMIT: usize = 16 * 1024;
+
+/// Sent with every response, the built assets included.
+const SECURITY_HEADERS: [(HeaderName, &str); 4] = [
+    (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+    (header::X_FRAME_OPTIONS, "DENY"),
+    (header::REFERRER_POLICY, "same-origin"),
+    // No `script-src`: in development the page loads scripts from the Vite
+    // dev server and runs an inline React Refresh preamble. A production app
+    // should add one, with a nonce for any inline script.
+    (
+        header::CONTENT_SECURITY_POLICY,
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
+    ),
+];
 
 /// The application, with its routes and middleware.
 pub fn app() -> Router {
@@ -30,7 +56,11 @@ pub fn app() -> Router {
 pub fn app_with(db: Db, config: Config) -> Router {
     use routes::*;
 
-    Router::new()
+    // Cookies only get `Secure` when the app is served over HTTPS, since
+    // browsers drop them on plain `http://127.0.0.1`.
+    let secure = std::env::var("APP_URL").is_ok_and(|url| url.starts_with("https://"));
+
+    let router = Router::new()
         .route("/", get(dashboard::show))
         .route("/contacts", get(contacts::index).post(contacts::store))
         .route("/contacts/create", get(contacts::create))
@@ -60,10 +90,29 @@ pub fn app_with(db: Db, config: Config) -> Router {
         .with_state(db)
         // Inside the Inertia layer, so it can share props with every page.
         .layer(middleware::from_fn(share_auth))
+        // Inside the Inertia layer too, so a rejected form gets an error page.
+        .layer(middleware::from_fn_with_state(
+            SecureCookies(secure),
+            csrf::verify,
+        ))
         .layer(InertiaLayer::new(config))
         // Outside the Inertia layer, so flash data and errors have a session.
-        .layer(SessionManagerLayer::new(MemoryStore::default()).with_secure(false))
-        .nest_service("/build", ServeDir::new("public/build"))
+        .layer(
+            SessionManagerLayer::new(PruningMemoryStore::default())
+                .with_secure(secure)
+                .with_expiry(Expiry::OnInactivity(Duration::hours(2))),
+        )
+        .layer(DefaultBodyLimit::max(BODY_LIMIT))
+        .nest_service("/build", ServeDir::new("public/build"));
+
+    SECURITY_HEADERS
+        .into_iter()
+        .fold(router, |router, (name, value)| {
+            router.layer(SetResponseHeaderLayer::if_not_present(
+                name,
+                HeaderValue::from_static(value),
+            ))
+        })
 }
 
 /// The Inertia configuration: asset version, root view, shared props and SSR.

@@ -55,12 +55,12 @@ Each card in the app has a small orange label naming the Rust API behind it.
 | Page | Inertia features | Where to look |
 | --- | --- | --- |
 | **Dashboard** `/` | Shared props from `Config::share` and from middleware (`inertia.share`); deferred props in two parallel groups (`defer().group(..)`) with `<Deferred>`; a failing deferred prop that's rescued (`try_lazy().rescue()`) and shown in `<Deferred rescue>`; a once prop the client remembers for 60s (`once().until(..)`); SSR | `src/routes/dashboard.rs`, `src/lib.rs`, `pages/Dashboard.tsx` |
-| **Contacts** `/contacts` | Partial reloads (`only: ['contacts', 'filters']`) for live search with `preserveState`; link prefetching on hover and on mount (`prefetch="mount"`); the `<Form>` component; error bags (`errorBag="quickAdd"`); `inertia.back()` | `src/routes/contacts.rs`, `pages/Contacts/Index.tsx` |
-| **New / Edit contact** | Server-side validation with `ValidationErrors` and `back_with_errors`; flash messages (`inertia.flash`) shown as a toast; `redirect` after `POST`; `useForm` with `isDirty`/`recentlySuccessful`; `PUT` and `DELETE` redirects turned into `303 See Other` | `pages/Contacts/Create.tsx`, `pages/Contacts/Edit.tsx`, `pages/Contacts/Show.tsx` |
+| **Contacts** `/contacts` | Partial reloads (`only: ['contacts', 'filters']`) for live search with `preserveState`; link prefetching on hover and on mount (`prefetch="mount"`); the `<Form>` component; error bags (`errorBag="quickAdd"`) | `src/routes/contacts.rs`, `pages/Contacts/Index.tsx` |
+| **New / Edit contact** | Server-side validation with `ValidationErrors` and `with_errors`, then a redirect to a known route; flash messages (`inertia.flash`) shown as a toast; `redirect` after `POST`; `useForm` with `isDirty`/`recentlySuccessful`; `PUT` and `DELETE` redirects turned into `303 See Other` | `pages/Contacts/Create.tsx`, `pages/Contacts/Edit.tsx`, `pages/Contacts/Show.tsx` |
 | **Feed** `/feed` | Infinite scroll: `inertia::scroll_with` + `Paginator`, rendered by `<InfiniteScroll>`. The URL tracks the page as you scroll. | `src/routes/feed.rs`, `pages/Feed.tsx` |
 | **Leaderboard** `/leaderboard` | Merge props (`merge().match_on("id")`): "Load more" appends pages; "Play a round" reloads every visible row and updates them in place instead of duplicating them. Deep merge (`deep_merge`) for a summary object. `only` on a `POST` visit. | `src/routes/leaderboard.rs`, `pages/Leaderboard.tsx` |
 | **Live** `/live` | Polling (`usePoll` with `only: ['metrics']`, pausable); lazy props computed only when requested (`inertia::lazy`); `always` props sent on every partial reload; an optional prop (`inertia::optional`) fetched by `<WhenVisible>` when you scroll to it | `src/routes/live.rs`, `pages/Live.tsx` |
-| **Redirects** `/redirects` | Every redirect rule of the protocol: back with `302`, `PUT` → `303`, redirect to a `#fragment` (`409` + `X-Inertia-Redirect`), an empty `200` turned into a redirect back, and an external `inertia.location(..)` (`409` + `X-Inertia-Location`) | `src/routes/redirects.rs`, `pages/Redirects.tsx` |
+| **Redirects** `/redirects` | Every redirect rule of the protocol: a `302` after `POST`, `PUT` → `303`, redirect to a `#fragment` (`409` + `X-Inertia-Redirect`), an empty `200` turned into a redirect back, and an external `inertia.location(..)` (`409` + `X-Inertia-Location`) | `src/routes/redirects.rs`, `pages/Redirects.tsx` |
 | **Vault** `/vault` | History encryption (`.encrypt_history(true)`) and `inertia.clear_history()` on "lock", as a logout would | `src/routes/vault.rs`, `pages/Vault.tsx` |
 | **Layouts** `/layouts` | Persistent layouts: `AppLayout` is the default for every page (the `layout` option in `app.tsx`), and its "layout up Ns" clock keeps counting across visits. These two pages nest a second persistent layout (`Page.layout = [AppLayout, SectionLayout]`) whose text input survives navigation. | `layouts/`, `pages/Layouts/` |
 | **Any other URL** | Error pages are Inertia pages with a status code: `(StatusCode::NOT_FOUND, inertia.render("Error", ..))` from the router's fallback | `src/routes/errors.rs`, `pages/Error.tsx` |
@@ -96,3 +96,14 @@ vite.config.ts       Vite, the Inertia plugin, and the plugin that writes public
 The middleware order in `src/lib.rs` matters: the session layer wraps the Inertia layer (so flash data and errors have somewhere to live), and the auth middleware sits inside it (so it can call `inertia.share`).
 
 inertia-omega's README links a companion `laravel-omega-vite` crate for Vite asset tags. It isn't published, so `src/vite.rs` is a ~100-line stand-in covering what this app needs.
+
+## Security
+
+The app is a demo, bound to `127.0.0.1`, but it's set up the way a real one should be:
+
+- **CSRF.** Every response sets an `XSRF-TOKEN` cookie, which Inertia's client sends back in an `X-XSRF-TOKEN` header. A `POST`, `PUT`, `PATCH` or `DELETE` without a matching header gets a `419` (`src/csrf.rs`).
+- **Redirects.** Handlers redirect to known routes rather than `inertia.back()`, which follows the `Referer` header wherever it points.
+- **Cookies.** Session and CSRF cookies are `SameSite=Strict`, and `Secure` when `APP_URL` starts with `https://`. Sessions expire after two hours of inactivity, and expired ones are removed from memory (`src/session.rs`).
+- **Input limits.** Request bodies are capped at 16 KB, contact fields have length limits, and leaderboard pages are clamped to the ones that exist.
+- **Headers.** Every response carries `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and a `Content-Security-Policy` with `frame-ancestors 'none'`. There's no `script-src` yet, since the dev server needs an inline script; add one with a nonce for production. The Vault page is also `Cache-Control: no-store`.
+- **Node.** The Vite dev server only accepts cross-origin requests from localhost (Vite's default), and the SSR server binds `127.0.0.1`.

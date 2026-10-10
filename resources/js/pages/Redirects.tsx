@@ -4,8 +4,8 @@ import { Button, Card, PageHeader } from '@/components/ui'
 const cases = [
   {
     title: 'Redirect back',
-    feature: 'inertia.back()',
-    description: 'A POST answered with a 302 to the Referer, carrying a flash toast.',
+    feature: 'redirect(..) after POST',
+    description: 'A POST answered with a 302 back to this page, carrying a flash toast.',
     run: () => router.post('/redirects/back'),
   },
   {

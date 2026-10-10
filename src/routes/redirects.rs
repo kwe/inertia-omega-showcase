@@ -8,10 +8,12 @@ pub async fn index(inertia: Inertia) -> inertia::Response {
     inertia.render("Redirects", props! {})
 }
 
-/// `inertia.back()`: a `302` to the `Referer`, with a flash message.
+/// A `302` back to this page, with a flash message. The target is a known
+/// route: `inertia.back()` redirects to whatever the `Referer` header says,
+/// which a cross-site form can set to any URL.
 pub async fn back(inertia: Inertia) -> Response {
     inertia.flash("toast", "Redirected back with a 302.");
-    inertia.back().into_response()
+    inertia::redirect("/redirects").into_response()
 }
 
 /// A redirect after a `PUT` becomes a `303 See Other`, so it's followed with a `GET`.
@@ -32,7 +34,9 @@ pub async fn external(inertia: Inertia) -> Response {
     inertia.location("https://inertiajs.com").into_response()
 }
 
-/// An empty `200` to an Inertia visit becomes a redirect back.
+/// An empty `200` to an Inertia visit becomes a redirect back to the `Referer`.
+/// Only Inertia visits get this, and their `X-Inertia` header can't be sent
+/// cross-site without a CORS preflight, so the `Referer` is our own page.
 pub async fn empty(inertia: Inertia) -> StatusCode {
     inertia.flash("toast", "An empty 200 became a redirect back.");
     StatusCode::OK

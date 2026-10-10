@@ -11,6 +11,11 @@ use crate::db::Db;
 
 const ROLES: [&str; 5] = ["Engineer", "Designer", "Founder", "Product", "Support"];
 
+/// Field length limits, so a client can't store megabytes in one contact.
+const MAX_NAME: usize = 100;
+const MAX_EMAIL: usize = 254;
+const MAX_COMPANY: usize = 100;
+
 #[derive(Deserialize)]
 pub struct Filters {
     #[serde(default)]
@@ -77,11 +82,21 @@ fn validate(db: &Db, form: &ContactForm, except: Option<u64>, full: bool) -> Val
         errors.add("name", "The name field is required.");
     } else if name.chars().count() < 3 {
         errors.add("name", "The name must be at least 3 characters.");
+    } else if name.chars().count() > MAX_NAME {
+        errors.add(
+            "name",
+            format!("The name may not be longer than {MAX_NAME} characters."),
+        );
     }
 
     let email = form.email.trim();
     if email.is_empty() {
         errors.add("email", "The email field is required.");
+    } else if email.chars().count() > MAX_EMAIL {
+        errors.add(
+            "email",
+            format!("The email may not be longer than {MAX_EMAIL} characters."),
+        );
     } else if !is_email(email) {
         errors.add("email", "The email must be a valid email address.");
     } else if db.email_taken(email, except) {
@@ -89,8 +104,14 @@ fn validate(db: &Db, form: &ContactForm, except: Option<u64>, full: bool) -> Val
     }
 
     if full {
-        if form.company.trim().is_empty() {
+        let company = form.company.trim();
+        if company.is_empty() {
             errors.add("company", "The company field is required.");
+        } else if company.chars().count() > MAX_COMPANY {
+            errors.add(
+                "company",
+                format!("The company may not be longer than {MAX_COMPANY} characters."),
+            );
         }
         if !ROLES.contains(&form.role.as_str()) {
             errors.add("role", "Pick one of the listed roles.");
@@ -120,8 +141,10 @@ pub async fn store(
 ) -> Response {
     let errors = validate(&db, &form, None, true);
     if !errors.is_empty() {
-        // Back to the form; the errors arrive in its `errors` prop.
-        return inertia.back_with_errors(errors).into_response();
+        // Back to the form; the errors arrive in its `errors` prop. The target
+        // is a known route rather than `back()`, which trusts the `Referer`.
+        inertia.with_errors(errors);
+        return inertia::redirect("/contacts/create").into_response();
     }
 
     let contact = db.create_contact(&form.name, &form.email, &form.company, &form.role);
@@ -140,13 +163,14 @@ pub async fn quick_store(
 ) -> Response {
     let errors = validate(&db, &form, None, false);
     if !errors.is_empty() {
-        return inertia.back_with_errors(errors).into_response();
+        inertia.with_errors(errors);
+        return inertia::redirect("/contacts").into_response();
     }
 
     let contact = db.create_contact(&form.name, &form.email, "Independent", "Engineer");
     inertia.flash("toast", format!("{} was quick-added.", contact.name));
 
-    inertia.back().into_response()
+    inertia::redirect("/contacts").into_response()
 }
 
 /// `PUT /contacts/{id}`, from `useForm` on the edit page. The redirect after a
@@ -163,7 +187,8 @@ pub async fn update(
 
     let errors = validate(&db, &form, Some(id), true);
     if !errors.is_empty() {
-        return inertia.back_with_errors(errors).into_response();
+        inertia.with_errors(errors);
+        return inertia::redirect(&format!("/contacts/{id}/edit")).into_response();
     }
 
     db.update_contact(id, &form.name, &form.email, &form.company, &form.role);
