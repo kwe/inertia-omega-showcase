@@ -778,4 +778,27 @@ async fn signing_out_needs_the_csrf_header() {
     )
     .await;
     assert_eq!(response.status.as_u16(), 419);
+    // The error page still renders inside the signed-in layout.
+    response
+        .page()
+        .component("Error")
+        .equals("auth.user.name", "Ferris Crab");
+}
+
+#[tokio::test]
+async fn registering_also_goes_where_the_guest_was_headed() {
+    let mut app = guest();
+    let response = send(&app, inertia("GET", "/vault").body(Body::empty()).unwrap()).await;
+    app.session = response.session_cookie();
+
+    let response = send(
+        &app,
+        form("POST", "/register")
+            .body(Body::from(
+                r#"{"name":"Corro Crab","email":"corro@example.com","password":"unsafe-rust","password_confirmation":"unsafe-rust"}"#,
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(response.header("location"), Some("/vault"));
 }

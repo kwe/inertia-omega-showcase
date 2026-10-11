@@ -233,25 +233,25 @@ impl Db {
 
     // Sign-in throttling
 
-    /// How long the email is locked out for, if it has too many failures.
-    pub fn login_lockout(&self, email: &str) -> Option<Duration> {
-        let tables = self.lock();
-        let (count, since) = tables.login_failures.get(email)?;
-        let remaining = LOGIN_LOCKOUT.checked_sub(since.elapsed())?;
-        (*count >= MAX_LOGIN_ATTEMPTS && !remaining.is_zero()).then_some(remaining)
-    }
-
-    pub fn record_login_failure(&self, email: &str) {
+    /// Counts a sign-in attempt against the email before its password is
+    /// checked, or says how long it's locked out for. Checking and counting
+    /// under one lock means a burst of concurrent attempts can't all slip in
+    /// before any of them is counted. A successful sign-in clears the count.
+    pub fn begin_login_attempt(&self, email: &str) -> Result<(), Duration> {
         let mut tables = self.lock();
         // Forget stale entries, so made-up emails can't grow the map forever.
         tables
             .login_failures
             .retain(|_, (_, since)| since.elapsed() < LOGIN_LOCKOUT);
-        let entry = tables
+        let (count, since) = tables
             .login_failures
             .entry(email.to_owned())
             .or_insert((0, Instant::now()));
-        entry.0 += 1;
+        if *count >= MAX_LOGIN_ATTEMPTS {
+            return Err(LOGIN_LOCKOUT.saturating_sub(since.elapsed()));
+        }
+        *count += 1;
+        Ok(())
     }
 
     pub fn clear_login_failures(&self, email: &str) {
@@ -389,4 +389,23 @@ pub fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attempts_are_counted_before_they_are_checked() {
+        let db = Db::seeded();
+        for _ in 0..MAX_LOGIN_ATTEMPTS {
+            assert!(db.begin_login_attempt("a@example.com").is_ok());
+        }
+        let wait = db.begin_login_attempt("a@example.com").unwrap_err();
+        assert!(wait <= LOGIN_LOCKOUT && !wait.is_zero());
+        assert!(db.begin_login_attempt("b@example.com").is_ok());
+
+        db.clear_login_failures("a@example.com");
+        assert!(db.begin_login_attempt("a@example.com").is_ok());
+    }
 }

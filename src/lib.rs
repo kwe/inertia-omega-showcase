@@ -103,16 +103,17 @@ pub fn app_with(db: Db, config: Config) -> Router {
         .merge(members)
         .fallback(errors::not_found)
         .with_state(db.clone())
-        // Inside the Inertia layer, so it can share the user with every page,
-        // and inside the session layer, which holds the user's id.
-        .layer(middleware::from_fn_with_state(
-            db,
-            crate::auth::authenticate,
-        ))
-        // Inside the Inertia layer too, so a rejected form gets an error page.
+        // Inside the Inertia layer, so a rejected form gets an error page.
         .layer(middleware::from_fn_with_state(
             SecureCookies(secure),
             csrf::verify,
+        ))
+        // Inside the Inertia layer too, so it can share the user with every
+        // page, and inside the session layer, which holds the user's id. It
+        // wraps the CSRF check, so a 419 page still knows who's signed in.
+        .layer(middleware::from_fn_with_state(
+            db,
+            crate::auth::authenticate,
         ))
         .layer(InertiaLayer::new(config))
         // Outside the Inertia layer, so flash data and errors have a session.

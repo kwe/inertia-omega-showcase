@@ -142,7 +142,7 @@ tests/app.rs         Protocol-level tests
 vite.config.ts       Vite, the Inertia plugin, and the plugin that writes public/hot
 ```
 
-The middleware order in `src/lib.rs` matters: the session layer wraps the Inertia layer (so flash data and errors have somewhere to live), and the auth middleware sits inside both (so it can read the user's id from the session and call `inertia.share`). The guest and members routes are two routers merged together, each with a `route_layer` that redirects the wrong kind of visitor, so unknown URLs still reach the 404 fallback.
+The middleware order in `src/lib.rs` matters: the session layer wraps the Inertia layer (so flash data and errors have somewhere to live), and the auth middleware sits inside both (so it can read the user's id from the session and call `inertia.share`). The CSRF check sits inside the auth middleware, so a `419` page still renders with the signed-in layout. The guest and members routes are two routers merged together, each with a `route_layer` that redirects the wrong kind of visitor, so unknown URLs still reach the 404 fallback.
 
 inertia-omega's README links a companion `laravel-omega-vite` crate for Vite asset tags. It isn't published, so `src/vite.rs` is a ~100-line stand-in covering what this app needs.
 
@@ -150,7 +150,7 @@ inertia-omega's README links a companion `laravel-omega-vite` crate for Vite ass
 
 The app is a demo, bound to `127.0.0.1`, but it's set up the way a real one should be:
 
-- **Authentication.** Passwords are hashed with Argon2id at OWASP's recommended parameters, off the async workers (`spawn_blocking`). The session id changes on sign-in and sign-out, so a session planted before sign-in is useless after it. A failed sign-in gives the same error whether the email exists or not, and an unknown email is checked against a dummy hash so it takes as long to reject. Five failures lock an email for a minute. The page to return to after sign-in must be a path on this site. For a real app, also throttle by IP (this one doesn't see client addresses) and keep accounts in a database.
+- **Authentication.** Passwords are hashed with Argon2id at OWASP's recommended parameters, off the async workers (`spawn_blocking`). The session id changes on sign-in and sign-out, so a session planted before sign-in is useless after it. A failed sign-in gives the same error whether the email exists or not, and an unknown email is checked against a dummy hash so it takes as long to reject. Five attempts lock an email for a minute; each attempt is counted before its password is checked, so concurrent requests can't get past the limit. The page to return to after sign-in must be a path on this site. For a real app, also throttle by IP (this one doesn't see client addresses) and keep accounts in a database.
 - **CSRF.** Every response sets an `XSRF-TOKEN` cookie, which Inertia's client sends back in an `X-XSRF-TOKEN` header. A `POST`, `PUT`, `PATCH` or `DELETE` without a matching header gets a `419` (`src/csrf.rs`).
 - **Redirects.** Handlers redirect to known routes rather than `inertia.back()`, which follows the `Referer` header wherever it points.
 - **Cookies.** Session and CSRF cookies are `SameSite=Strict`, and `Secure` when `APP_URL` starts with `https://`. Sessions expire after two hours of inactivity, and expired ones are removed from memory (`src/session.rs`).

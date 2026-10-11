@@ -55,7 +55,7 @@ pub async fn login(
         errors.add("password", "The password field is required.");
     }
     if errors.is_empty()
-        && let Some(wait) = db.login_lockout(&email)
+        && let Err(wait) = db.begin_login_attempt(&email)
     {
         errors.add(
             "email",
@@ -78,7 +78,6 @@ pub async fn login(
     let account = match account {
         Some(account) if verified => account,
         _ => {
-            db.record_login_failure(&email);
             let mut errors = ValidationErrors::new();
             errors.add("email", "These credentials don't match our records.");
             inertia.with_errors(errors);
@@ -107,7 +106,8 @@ pub struct RegisterForm {
     password_confirmation: String,
 }
 
-/// `POST /register`: creates the account and signs it in.
+/// `POST /register`: creates the account, signs it in and goes where the
+/// guest was headed, like signing in does.
 pub async fn register(
     inertia: Inertia,
     State(db): State<Db>,
@@ -136,7 +136,7 @@ pub async fn register(
         format!("Welcome, {}. Your account is ready.", user.name),
     );
 
-    inertia::redirect("/").into_response()
+    inertia::redirect(&auth::intended(&session).await).into_response()
 }
 
 fn validate_registration(db: &Db, form: &RegisterForm, email: &str) -> ValidationErrors {
