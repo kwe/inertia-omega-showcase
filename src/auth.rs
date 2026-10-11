@@ -22,7 +22,7 @@ use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use inertia::Inertia;
-use tower_sessions::Session;
+use tower_sessions::{Session, session};
 
 use crate::db::{Db, User};
 
@@ -78,22 +78,16 @@ pub fn normalize_email(email: &str) -> String {
 }
 
 /// Signs the user in on this session, under a new session id.
-pub async fn login(session: &Session, user: &User) -> Result<(), Response> {
-    session.cycle_id().await.map_err(session_error)?;
-    session
-        .insert(USER_KEY, user.id)
-        .await
-        .map_err(session_error)
+pub async fn login(session: &Session, user: &User) -> Result<(), session::Error> {
+    session.cycle_id().await?;
+    session.insert(USER_KEY, user.id).await
 }
 
 /// Signs the user out, under a new session id. The rest of the session stays,
 /// so the page after it can still get a flash message.
-pub async fn logout(session: &Session) -> Result<(), Response> {
-    session
-        .remove::<u64>(USER_KEY)
-        .await
-        .map_err(session_error)?;
-    session.cycle_id().await.map_err(session_error)
+pub async fn logout(session: &Session) -> Result<(), session::Error> {
+    session.remove::<u64>(USER_KEY).await?;
+    session.cycle_id().await
 }
 
 /// Where to go after signing in: the page the guest was sent away from, or
@@ -114,7 +108,8 @@ fn is_local_path(path: &str) -> bool {
     path.starts_with('/') && !path.starts_with("//") && !path.starts_with("/\\")
 }
 
-fn session_error(error: tower_sessions::session::Error) -> Response {
+/// A session store failure, as a response.
+pub fn session_error(error: session::Error) -> Response {
     tracing::error!(%error, "session store failed");
     StatusCode::INTERNAL_SERVER_ERROR.into_response()
 }
@@ -155,12 +150,8 @@ pub async fn require_user(session: Session, request: Request, next: Next) -> Res
             .uri()
             .path_and_query()
             .map_or("/", |path| path.as_str());
-        if let Err(response) = session
-            .insert(INTENDED_KEY, path)
-            .await
-            .map_err(session_error)
-        {
-            return response;
+        if let Err(error) = session.insert(INTENDED_KEY, path).await {
+            return session_error(error);
         }
     }
 

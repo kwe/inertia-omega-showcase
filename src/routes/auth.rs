@@ -87,8 +87,8 @@ pub async fn login(
     };
 
     db.clear_login_failures(&email);
-    if let Err(response) = auth::login(&session, &account.user).await {
-        return response;
+    if let Err(error) = auth::login(&session, &account.user).await {
+        return auth::session_error(error);
     }
     inertia.flash("toast", format!("Welcome back, {}.", account.user.name));
 
@@ -128,8 +128,8 @@ pub async fn register(
         return inertia::redirect("/register").into_response();
     };
 
-    if let Err(response) = auth::login(&session, &user).await {
-        return response;
+    if let Err(error) = auth::login(&session, &user).await {
+        return auth::session_error(error);
     }
     inertia.flash(
         "toast",
@@ -188,8 +188,8 @@ fn validate_registration(db: &Db, form: &RegisterForm, email: &str) -> Validatio
 /// `POST /logout`. Also clears the browser history, so encrypted pages such
 /// as the vault can't be brought back with the back button.
 pub async fn logout(inertia: Inertia, session: Session) -> Response {
-    if let Err(response) = auth::logout(&session).await {
-        return response;
+    if let Err(error) = auth::logout(&session).await {
+        return auth::session_error(error);
     }
     inertia.clear_history();
     inertia.flash("toast", "You've been signed out.");
