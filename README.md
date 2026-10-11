@@ -1,5 +1,7 @@
 # Omega Showcase
 
+[![CI](https://github.com/kwe/inertia-omega-showcase/actions/workflows/ci.yml/badge.svg)](https://github.com/kwe/inertia-omega-showcase/actions/workflows/ci.yml)
+
 A small, complete [Inertia.js](https://inertiajs.com) v3 app with a Rust backend. Axum handles every route and returns a page component with its props; React renders it. There's no client-side router and no JSON API to maintain.
 
 The server side is [inertia-omega](https://github.com/inertiajs/inertia-omega), the Rust port of the official Laravel adapter. This app tries to touch as much of it as it reasonably can, one page per group of features.
@@ -10,6 +12,21 @@ The server side is [inertia-omega](https://github.com/inertiajs/inertia-omega), 
 | Frontend | React 19, `@inertiajs/react` 3.9, TypeScript, Tailwind CSS 4 |
 | Build | Vite 8 with `@inertiajs/vite` (page resolution and SSR) |
 | Data | Seeded in memory on startup, so there's nothing to set up. Restarting resets it. |
+
+![The dashboard: shared props, two deferred groups, a rescued prop and a once prop](docs/screenshots/dashboard.png)
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/contacts.png" alt="Contacts: live search with partial reloads and a quick-add form with its own error bag"></td>
+    <td><img src="docs/screenshots/leaderboard.png" alt="Leaderboard: merge props matched on id"></td>
+    <td><img src="docs/screenshots/ssr-no-js.png" alt="A page rendered by SSR with JavaScript disabled"></td>
+  </tr>
+  <tr>
+    <td align="center">Contacts: partial reloads and error bags</td>
+    <td align="center">Leaderboard: merge props</td>
+    <td align="center">SSR with JavaScript off</td>
+  </tr>
+</table>
 
 ## Running it
 
@@ -48,6 +65,13 @@ cargo test
 
 `tests/app.rs` drives the router directly with `tower::ServiceExt::oneshot` and checks each feature at the protocol level with inertia-omega's `AssertablePage`: deferred groups, rescued props, error bags in the session, flash data, 303s, 409s, scroll and merge metadata, and so on.
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request, in two jobs:
+
+- **Rust:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` and a release build.
+- **Frontend:** `npm ci` and `npm run build`, which typechecks with `tsc` and builds both the client bundle and the SSR bundle.
+
 ## What each page shows
 
 Each card in the app has a small orange label naming the Rust API behind it.
@@ -73,6 +97,24 @@ And across the whole app:
 - **Page titles.** `<Head title>` plus the `title` callback in `app.tsx`, rendered on the server too.
 - **TypeScript types for shared props and flash data.** `resources/js/types.ts` extends `InertiaConfig`, so `usePage().props.auth` and `usePage().flash.toast` are typed.
 
+## Performance
+
+Measured on an Apple M4 Mac mini (10 cores) against a release build and the production bundle, with `hey` at 50 connections for 8 seconds per route, on the same machine.
+
+| Route | Full page with SSR (req/s, p50 / p99) | Inertia visit, JSON (req/s, p50 / p99) |
+| --- | --- | --- |
+| `/` | 2,440, 18 / 66 ms | 56,800, 0.8 / 2.2 ms |
+| `/contacts` | 1,030, 41 / 124 ms | 49,800, 1.0 / 1.9 ms |
+| `/leaderboard` | 2,640, 17 / 62 ms | 53,900, 0.9 / 1.9 ms |
+| `/live` | 2,830, 16 / 60 ms | 56,400, 0.8 / 2.5 ms |
+| `/vault` | 3,550, 12 / 40 ms | 59,500, 0.8 / 2.2 ms |
+
+The Rust side is rarely the limit: with the SSR server stopped, full pages run at 31,000 to 35,000 req/s, and under load the Axum process uses about 14% CPU and 25 to 34 MB. The single-threaded Node SSR server is the ceiling for first visits; every visit after that is a JSON response. The client bundle is one 108 KB (gzip) vendor chunk for React and Inertia, plus 1 to 4 KB per page.
+
+Some slowness is on purpose: `/feed` and the dashboard's deferred groups sleep for 300 ms to 1.5 s so the loading states are visible.
+
+Ways to go faster, if you build on this: run several SSR workers (Node cluster), serve the hashed assets precompressed with `Cache-Control: immutable`, and add a `modulepreload` tag for the current page's chunk.
+
 ## How it fits together
 
 ```text
@@ -90,6 +132,7 @@ resources/
     ├── pages/       One component per Inertia page
     └── components/  Small UI pieces
 tests/app.rs         Protocol-level tests
+.github/workflows/   CI: Rust checks and the frontend build
 vite.config.ts       Vite, the Inertia plugin, and the plugin that writes public/hot
 ```
 
