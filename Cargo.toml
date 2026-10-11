@@ -8,6 +8,7 @@ description = "A showcase of Inertia.js v3 features, served by Axum through iner
 [dependencies]
 # The crate's library name is `inertia`.
 inertia-omega = { git = "https://github.com/inertiajs/inertia-omega", rev = "6667d8d" }
+argon2 = { version = "0.5", features = ["std"] }
 axum = "0.8"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal"] }
 tower-sessions = { version = "0.15", features = ["memory-store"] }
@@ -22,3 +23,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+
+# Password hashing is deliberately slow; unoptimized, it takes seconds in tests.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
