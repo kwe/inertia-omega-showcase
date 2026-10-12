@@ -38,6 +38,16 @@ You need Rust 1.88 or newer and Node 20.19 or newer.
 npm install
 ```
 
+### Signing in
+
+Every page needs a signed-in user, so the app opens on the sign-in page at `/login`, whichever way you run it. Use the demo account:
+
+| Email | Password |
+| --- | --- |
+| `ferris@example.com` | `rustacean` |
+
+The sign-in page shows these too, with a button that signs you in with them. Or choose **Create an account** to register at `/register`. Accounts are kept in memory, so restarting the server forgets any you registered; the demo account is always there.
+
 ### Development
 
 Two terminals:
@@ -47,7 +57,7 @@ npm run dev     # Vite on :5173, with hot reload and SSR
 cargo run       # the app on http://127.0.0.1:3000
 ```
 
-Open http://127.0.0.1:3000 (the Rust server, not Vite) and sign in with the demo account, `ferris@example.com` / `rustacean`, or register your own. While Vite runs, it writes its URL to `public/hot`. The Rust server sees that file, points the asset tags at the dev server, and renders pages server-side through Vite's `/__inertia_ssr` endpoint, so there's no separate SSR process in development.
+Open http://127.0.0.1:3000 (the Rust server, not Vite) and sign in as above. While Vite runs, it writes its URL to `public/hot`. The Rust server sees that file, points the asset tags at the dev server, and renders pages server-side through Vite's `/__inertia_ssr` endpoint, so there's no separate SSR process in development.
 
 ### Production build
 
@@ -57,7 +67,7 @@ npm run ssr     # the Node SSR server on :13714 (optional)
 cargo run --release
 ```
 
-If the SSR server isn't running, pages render in the browser instead; nothing else changes.
+Then open http://127.0.0.1:3000 and sign in as above. If the SSR server isn't running, pages render in the browser instead; nothing else changes.
 
 ### Tests
 
