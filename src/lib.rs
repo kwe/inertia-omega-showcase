@@ -5,21 +5,22 @@
 //! - `routes`: one module per showcase page.
 //! - `csrf`: the `XSRF-TOKEN` cookie and its check on every form submission.
 //! - `session`: an in-memory session store that forgets expired sessions.
+//! - `auth`: sign-in sessions, password hashing and the auth middleware.
 
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, Request};
+use axum::extract::DefaultBodyLimit;
 use axum::http::{HeaderName, HeaderValue, header};
-use axum::middleware::{self, Next};
-use axum::response::Response;
+use axum::middleware;
 use axum::routing::{get, post, put};
 use inertia::axum::InertiaLayer;
 use inertia::ssr::HttpGateway;
-use inertia::{Config, Inertia, View, props};
+use inertia::{Config, View, props};
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_sessions::cookie::time::Duration;
 use tower_sessions::{Expiry, SessionManagerLayer};
 
+pub mod auth;
 pub mod csrf;
 pub mod db;
 pub mod routes;
@@ -60,7 +61,15 @@ pub fn app_with(db: Db, config: Config) -> Router {
     // browsers drop them on plain `http://127.0.0.1`.
     let secure = std::env::var("APP_URL").is_ok_and(|url| url.starts_with("https://"));
 
-    let router = Router::new()
+    // Signed-in users are sent away from these.
+    let guest = Router::new()
+        .route("/login", get(auth::create_login).post(auth::login))
+        .route("/register", get(auth::create_register).post(auth::register))
+        .route_layer(middleware::from_fn(crate::auth::require_guest));
+
+    // Guests are sent to /login from these. Unknown URLs, handled by the
+    // fallback, still get a 404 rather than a redirect.
+    let members = Router::new()
         .route("/", get(dashboard::show))
         .route("/contacts", get(contacts::index).post(contacts::store))
         .route("/contacts/create", get(contacts::create))
@@ -86,14 +95,25 @@ pub fn app_with(db: Db, config: Config) -> Router {
         .route("/vault/lock", post(vault::lock))
         .route("/layouts", get(layouts::index))
         .route("/layouts/other", get(layouts::other))
+        .route("/logout", post(auth::logout))
+        .route_layer(middleware::from_fn(crate::auth::require_user));
+
+    let router = Router::new()
+        .merge(guest)
+        .merge(members)
         .fallback(errors::not_found)
-        .with_state(db)
-        // Inside the Inertia layer, so it can share props with every page.
-        .layer(middleware::from_fn(share_auth))
-        // Inside the Inertia layer too, so a rejected form gets an error page.
+        .with_state(db.clone())
+        // Inside the Inertia layer, so a rejected form gets an error page.
         .layer(middleware::from_fn_with_state(
             SecureCookies(secure),
             csrf::verify,
+        ))
+        // Inside the Inertia layer too, so it can share the user with every
+        // page, and inside the session layer, which holds the user's id. It
+        // wraps the CSRF check, so a 419 page still knows who's signed in.
+        .layer(middleware::from_fn_with_state(
+            db,
+            crate::auth::authenticate,
         ))
         .layer(InertiaLayer::new(config))
         // Outside the Inertia layer, so flash data and errors have a session.
@@ -164,16 +184,4 @@ pub fn shared_props(config: Config) -> Config {
             "app.stack" => inertia::lazy(|| async { "Axum 0.8 · inertia-omega · React 19 · Vite" }),
         }
     })
-}
-
-/// Share the signed-in user with every page, like an auth middleware would.
-async fn share_auth(inertia: Inertia, request: Request, next: Next) -> Response {
-    inertia.share(
-        "auth.user",
-        props! {
-            "name" => "Ferris Crab",
-            "email" => "ferris@example.com",
-        },
-    );
-    next.run(request).await
 }

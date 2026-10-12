@@ -1,7 +1,8 @@
 //! An in-memory "database", seeded on startup, so the demo has no setup.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
@@ -31,8 +32,31 @@ pub struct Player {
     pub updated: u64,
 }
 
+/// A signed-in user, as the pages see it.
+#[derive(Clone, Debug, Serialize)]
+pub struct User {
+    pub id: u64,
+    pub name: String,
+    pub email: String,
+}
+
+/// A user and their password hash, which never leaves the server.
+#[derive(Clone, Debug)]
+pub struct Account {
+    pub user: User,
+    pub password_hash: String,
+}
+
+/// Failed sign-ins allowed per email before it's locked for a while.
+pub const MAX_LOGIN_ATTEMPTS: u32 = 5;
+pub const LOGIN_LOCKOUT: Duration = Duration::from_secs(60);
+
 #[derive(Default)]
 struct Tables {
+    accounts: Vec<Account>,
+    next_user_id: u64,
+    /// Failed sign-ins by email: how many, and when the first one was.
+    login_failures: HashMap<String, (u32, Instant)>,
     contacts: Vec<Contact>,
     next_contact_id: u64,
     posts: Vec<Post>,
@@ -105,6 +129,16 @@ impl Db {
             ..Tables::default()
         };
 
+        tables.accounts.push(Account {
+            user: User {
+                id: 1,
+                name: crate::auth::DEMO_NAME.to_owned(),
+                email: crate::auth::DEMO_EMAIL.to_owned(),
+            },
+            password_hash: crate::auth::hash_password(crate::auth::DEMO_PASSWORD),
+        });
+        tables.next_user_id = 2;
+
         for i in 0..24u64 {
             let first = FIRST[(i as usize) % FIRST.len()];
             let last = LAST[(i as usize * 7) % LAST.len()];
@@ -153,6 +187,75 @@ impl Db {
 
     fn lock(&self) -> MutexGuard<'_, Tables> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    // Users
+
+    pub fn user(&self, id: u64) -> Option<User> {
+        self.lock()
+            .accounts
+            .iter()
+            .find(|account| account.user.id == id)
+            .map(|account| account.user.clone())
+    }
+
+    /// Emails are stored lowercased, so callers pass a normalized one.
+    pub fn account_by_email(&self, email: &str) -> Option<Account> {
+        self.lock()
+            .accounts
+            .iter()
+            .find(|account| account.user.email == email)
+            .cloned()
+    }
+
+    /// `None` if the email was taken in the meantime.
+    pub fn create_user(&self, name: &str, email: &str, password_hash: String) -> Option<User> {
+        let mut tables = self.lock();
+        if tables
+            .accounts
+            .iter()
+            .any(|account| account.user.email == email)
+        {
+            return None;
+        }
+        let user = User {
+            id: tables.next_user_id,
+            name: name.trim().to_owned(),
+            email: email.to_owned(),
+        };
+        tables.next_user_id += 1;
+        tables.accounts.push(Account {
+            user: user.clone(),
+            password_hash,
+        });
+        Some(user)
+    }
+
+    // Sign-in throttling
+
+    /// Counts a sign-in attempt against the email before its password is
+    /// checked, or says how long it's locked out for. Checking and counting
+    /// under one lock means a burst of concurrent attempts can't all slip in
+    /// before any of them is counted. A successful sign-in clears the count.
+    pub fn begin_login_attempt(&self, email: &str) -> Result<(), Duration> {
+        let mut tables = self.lock();
+        // Forget stale entries, so made-up emails can't grow the map forever.
+        tables
+            .login_failures
+            .retain(|_, (_, since)| since.elapsed() < LOGIN_LOCKOUT);
+        let (count, since) = tables
+            .login_failures
+            .entry(email.to_owned())
+            .or_insert((0, Instant::now()));
+        if *count >= MAX_LOGIN_ATTEMPTS {
+            return Err(LOGIN_LOCKOUT.saturating_sub(since.elapsed()));
+        }
+        *count += 1;
+        Ok(())
+    }
+
+    pub fn clear_login_failures(&self, email: &str) {
+        self.lock().login_failures.remove(email);
     }
 
     // Contacts
@@ -286,4 +389,23 @@ pub fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attempts_are_counted_before_they_are_checked() {
+        let db = Db::seeded();
+        for _ in 0..MAX_LOGIN_ATTEMPTS {
+            assert!(db.begin_login_attempt("a@example.com").is_ok());
+        }
+        let wait = db.begin_login_attempt("a@example.com").unwrap_err();
+        assert!(wait <= LOGIN_LOCKOUT && !wait.is_zero());
+        assert!(db.begin_login_attempt("b@example.com").is_ok());
+
+        db.clear_login_failures("a@example.com");
+        assert!(db.begin_login_attempt("a@example.com").is_ok());
+    }
 }

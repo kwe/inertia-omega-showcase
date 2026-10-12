@@ -11,11 +11,13 @@ interface Props {
 
 export default function Dashboard({ contactsCount, stats, activity, forecast, tips }: Props) {
   const { app, auth } = usePage().props
+  // Always set here: the dashboard is behind the sign-in.
+  const user = auth.user!
 
   return (
     <>
       <Head title="Dashboard" />
-      <PageHeader title={`Welcome back, ${auth.user.name.split(' ')[0]}`}>
+      <PageHeader title={`Welcome back, ${user.name.split(' ')[0]}`}>
         A tour of Inertia.js v3, served by Rust. Every page here is a React component rendered from an Axum handler:
         no client-side router, and no API. Pick a page on the left; each one names the features it shows.
       </PageHeader>
@@ -24,7 +26,7 @@ export default function Dashboard({ contactsCount, stats, activity, forecast, ti
         <Card title="Shared props" feature="Config::share · inertia.share">
           <p className="text-sm text-stone-600">
             <strong>{app.name}</strong> comes from <code>Config::share</code>, and the signed-in user (
-            <strong>{auth.user.email}</strong>) from an Axum middleware calling <code>inertia.share</code>. Every page
+            <strong>{user.email}</strong>) from an Axum middleware calling <code>inertia.share</code>. Every page
             gets both, without each handler passing them.
           </p>
           <p className="mt-2 text-sm text-stone-600">

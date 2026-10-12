@@ -1,6 +1,7 @@
 //! One module per showcase page. Each handler returns an Inertia render or a
 //! redirect; the `InertiaLayer` turns renders into HTML or JSON.
 
+pub mod auth;
 pub mod contacts;
 pub mod dashboard;
 pub mod errors;

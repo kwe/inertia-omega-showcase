@@ -1,5 +1,6 @@
-import { Link, usePage } from '@inertiajs/react'
+import { Link, router, usePage } from '@inertiajs/react'
 import { useEffect, useState, type ReactNode } from 'react'
+import Toast from '@/components/Toast'
 
 const nav = [
   { href: '/', label: 'Dashboard', hint: 'Deferred · once · rescue' },
@@ -32,9 +33,28 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </Link>
           <div className="flex items-center gap-4 text-sm text-stone-500">
             <MountedClock />
-            <span className="hidden sm:inline">
-              Signed in as <span className="font-medium text-stone-800">{auth.user.name}</span>
-            </span>
+            {auth.user ? (
+              <>
+                <span className="hidden sm:inline" title={auth.user.email}>
+                  Signed in as <span className="font-medium text-stone-800">{auth.user.name}</span>
+                </span>
+                {/* A POST, so it carries the CSRF header. Prefetched pages
+                    belong to this user, so they're dropped on the way out. */}
+                <Link
+                  href="/logout"
+                  method="post"
+                  as="button"
+                  onSuccess={() => router.flushAll()}
+                  className="rounded-lg px-2.5 py-1.5 font-medium text-stone-700 ring-1 ring-stone-300 hover:bg-stone-100"
+                >
+                  Sign out
+                </Link>
+              </>
+            ) : (
+              <Link href="/login" className="font-medium text-orange-700 hover:underline">
+                Sign in
+              </Link>
+            )}
           </div>
         </div>
       </header>
@@ -89,35 +109,5 @@ function MountedClock() {
     <span title="The layout has been mounted this long. It persists across Inertia visits." className="tabular-nums">
       layout up {seconds}s
     </span>
-  )
-}
-
-/**
- * Flash data arrives in the page's `flash` field, not its props, so it isn't
- * kept in the browser history: going back doesn't replay the toast.
- */
-function Toast() {
-  const { flash } = usePage()
-  const [message, setMessage] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (flash.toast) setMessage(flash.toast)
-  }, [flash])
-
-  useEffect(() => {
-    if (!message) return
-    const timer = setTimeout(() => setMessage(null), 3500)
-    return () => clearTimeout(timer)
-  }, [message])
-
-  if (!message) return null
-
-  return (
-    <div
-      role="status"
-      className="fixed top-4 right-4 z-50 rounded-lg bg-stone-900 px-4 py-3 text-sm text-white shadow-lg [animation:toast-in_150ms_ease-out]"
-    >
-      {message}
-    </div>
   )
 }

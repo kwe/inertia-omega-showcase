@@ -1,9 +1,16 @@
 import type { Page } from '@inertiajs/core'
 
+export interface User {
+  id: number
+  name: string
+  email: string
+}
+
 /** Props every page receives: from `Config::share` and the auth middleware. */
 export interface SharedProps {
   app: { name: string; stack?: string }
-  auth: { user: { name: string; email: string } }
+  /** `null` on the guest pages (sign in, register) and guests' error pages. */
+  auth: { user: User | null }
   [key: string]: unknown
 }
 

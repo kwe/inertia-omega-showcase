@@ -121,7 +121,7 @@ fn validate(db: &Db, form: &ContactForm, except: Option<u64>, full: bool) -> Val
     errors
 }
 
-fn is_email(email: &str) -> bool {
+pub(crate) fn is_email(email: &str) -> bool {
     match email.split_once('@') {
         Some((user, domain)) => {
             !user.is_empty()
