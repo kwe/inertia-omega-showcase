@@ -1,6 +1,6 @@
 import { Head, router } from '@inertiajs/react'
 import { useState } from 'react'
-import { Button, Card, PageHeader } from '@/components/ui'
+import { Button, Card, PageHeader, time } from '@/components/ui'
 
 interface Player {
   id: number
@@ -9,14 +9,22 @@ interface Player {
   updated: number
 }
 
+interface Round {
+  id: number
+  at: number
+  points: number
+  best: string
+}
+
 interface Props {
   players: Player[]
+  rounds: Round[]
   page: number
   hasMore: boolean
   summary: { total: number; loadedPages: Record<string, boolean> }
 }
 
-export default function Leaderboard({ players, page, hasMore, summary }: Props) {
+export default function Leaderboard({ players, rounds, page, hasMore, summary }: Props) {
   const [busy, setBusy] = useState(false)
   const latest = Math.max(0, ...players.map((player) => player.updated))
   const ranked = [...players].sort((a, b) => b.score - a.score || a.id - b.id)
@@ -35,7 +43,7 @@ export default function Leaderboard({ players, page, hasMore, summary }: Props) 
   // reload returns every row on screen again. They're matched on `id`, so
   // players already shown are updated in place rather than duplicated.
   const play = () =>
-    router.post('/leaderboard/play', { upto: page }, { only: ['players', 'summary'], preserveScroll: true })
+    router.post('/leaderboard/play', { upto: page }, { only: ['players', 'rounds', 'summary'], preserveScroll: true })
 
   return (
     <>
@@ -75,6 +83,30 @@ export default function Leaderboard({ players, page, hasMore, summary }: Props) 
           </Button>
         )}
       </Card>
+
+      <div className="mt-4">
+        <Card title="Rounds played" feature="merge().prepend()">
+          {rounds.length === 0 ? (
+            <p className="text-sm text-stone-500">No rounds yet. Play one.</p>
+          ) : (
+            <ol className="space-y-1 text-sm">
+              {rounds.map((round) => (
+                <li key={round.id} className="flex justify-between gap-2">
+                  <span>
+                    Round {round.id}: <strong className="tabular-nums">{round.points}</strong> points, best{' '}
+                    {round.best}
+                  </span>
+                  <span className="text-xs text-stone-400 tabular-nums">{time(round.at)}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+          <p className="mt-3 text-xs text-stone-500">
+            The server only sends the latest round. It's a merge prop with <code>.prepend()</code>, so each one goes
+            on top of the rounds the page already has, and the log grows newest first until you leave the page.
+          </p>
+        </Card>
+      </div>
     </>
   )
 }

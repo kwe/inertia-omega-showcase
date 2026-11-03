@@ -2,6 +2,7 @@
 //! redirect; the `InertiaLayer` turns renders into HTML or JSON.
 
 pub mod auth;
+pub mod broadcasts;
 pub mod contacts;
 pub mod dashboard;
 pub mod errors;

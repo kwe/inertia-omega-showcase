@@ -1,5 +1,5 @@
-import { Deferred, Head, Link, usePage } from '@inertiajs/react'
-import { Card, Feature, PageHeader, Skeleton, time } from '@/components/ui'
+import { Deferred, Head, Link, router, usePage } from '@inertiajs/react'
+import { Button, Card, Feature, PageHeader, Skeleton, time } from '@/components/ui'
 
 interface Props {
   contactsCount: number
@@ -7,9 +7,10 @@ interface Props {
   activity?: string[]
   forecast?: string[]
   tips: { generatedAt: number; items: string[] }
+  bigId: bigint
 }
 
-export default function Dashboard({ contactsCount, stats, activity, forecast, tips }: Props) {
+export default function Dashboard({ contactsCount, stats, activity, forecast, tips, bigId }: Props) {
   const { app, auth } = usePage().props
   // Always set here: the dashboard is behind the sign-in.
   const user = auth.user!
@@ -85,7 +86,7 @@ export default function Dashboard({ contactsCount, stats, activity, forecast, ti
           </Deferred>
         </Card>
 
-        <Card title="Tips" feature="once().until(60s)">
+        <Card title="Tips" feature="once().until(60s) · fresh()">
           <p className="mb-3 text-xs text-stone-500">
             Resolved once and remembered by the client for a minute. Leave this page and come back: the timestamp stays
             at <strong className="tabular-nums">{time(tips.generatedAt)}</strong> because the server skips the prop.
@@ -95,6 +96,33 @@ export default function Dashboard({ contactsCount, stats, activity, forecast, ti
               <li key={tip}>💡 {tip}</li>
             ))}
           </ul>
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-stone-500">
+            <Button
+              variant="secondary"
+              onClick={() => router.reload({ data: { fresh: true }, only: ['tips'], preserveUrl: true })}
+            >
+              Refresh tips
+            </Button>
+            <span>
+              <code>?fresh=true</code> makes the server call <code>.fresh()</code> and send them anyway. The{' '}
+              <Link href="/layouts" className="text-orange-700 hover:underline">
+                Layouts
+              </Link>{' '}
+              page reads them as <code>hints</code> (<code>once_as</code>).
+            </span>
+          </div>
+        </Card>
+
+        <Card title="Big integers" feature="preserve_big_integers">
+          <p className="text-sm text-stone-600">
+            <code>bigId</code> is <strong className="tabular-nums">{bigId.toString()}</strong>, a{' '}
+            <code>{typeof bigId}</code>.
+          </p>
+          <p className="mt-2 text-xs text-stone-500">
+            That's 2<sup>53</sup> + 1, the first integer a JavaScript number can't hold: as a plain number it would
+            arrive as …992. The response sets <code>preserve_big_integers(true)</code>, so the client revives it as a{' '}
+            <code>BigInt</code>, digit for digit.
+          </p>
         </Card>
 
         <Card title="Server-side rendering" feature="ssr::HttpGateway">

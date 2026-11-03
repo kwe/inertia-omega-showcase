@@ -1,5 +1,6 @@
 //! Merge props: pages of players are appended to the list on the client, and
 //! matched on `id`, so reloading a player already shown updates it in place.
+//! The round log is prepended instead, newest first.
 
 use axum::Json;
 use axum::extract::{Query, State};
@@ -45,6 +46,13 @@ pub async fn index(
         "Leaderboard",
         props! {
             "players" => inertia::merge(rows).match_on("id"),
+            // Only the latest round is sent. Prepending it to the rounds the
+            // client already has builds a log, newest first, for as long as
+            // the page stays open; `match_on` keeps a resent round from
+            // showing twice.
+            "rounds" => inertia::merge(db.latest_round().into_iter().collect::<Vec<_>>())
+                .prepend()
+                .match_on("id"),
             "page" => page,
             "hasMore" => page < last,
             // Deep merged: the client keeps keys it already has and updates the rest.

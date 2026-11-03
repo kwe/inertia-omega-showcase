@@ -4,14 +4,15 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
-use inertia::Config;
 use inertia::testing::AssertablePage;
+use inertia::{Config, LiveChannel, LiveListener};
 use omega_showcase::db::Db;
 use omega_showcase::{app_with, shared_props};
 use serde_json::Value;
 use tower::ServiceExt;
 
 /// The app, with a session cookie for the signed-in demo user.
+#[derive(Clone)]
 struct TestApp {
     router: Router,
     session: Option<String>,
@@ -49,6 +50,20 @@ struct Sent {
 impl Sent {
     fn page(&self) -> AssertablePage {
         AssertablePage::from_body(&self.body)
+    }
+
+    /// The page, able to reload itself as the Inertia client would, and
+    /// checked against the page components in `resources/js/pages`.
+    fn reloadable(&self, app: &TestApp) -> AssertablePage {
+        let app = app.clone();
+        self.page()
+            .pages_in("resources/js/pages")
+            .reloads_with(move |reload| {
+                let mut request = Request::get(reload.url()).body(Body::empty()).unwrap();
+                request.headers_mut().extend(reload.headers().clone());
+                let app = app.clone();
+                async move { send(&app, request).await.page() }
+            })
     }
 
     fn json(&self) -> Value {
@@ -317,7 +332,11 @@ async fn the_leaderboard_merges_and_matches_on_id() {
 
     assert_eq!(page["props"]["players"].as_array().unwrap().len(), 20);
     assert_eq!(page["mergeProps"], serde_json::json!(["players"]));
-    assert_eq!(page["matchPropsOn"], serde_json::json!(["players.id"]));
+    assert_eq!(page["prependProps"], serde_json::json!(["rounds"]));
+    assert_eq!(
+        page["matchPropsOn"],
+        serde_json::json!(["players.id", "rounds.id"])
+    );
     assert_eq!(page["deepMergeProps"], serde_json::json!(["summary"]));
 }
 
@@ -801,4 +820,246 @@ async fn registering_also_goes_where_the_guest_was_headed() {
     )
     .await;
     assert_eq!(response.header("location"), Some("/vault"));
+}
+
+#[tokio::test]
+async fn deferred_props_load_after_the_first_render() {
+    let app = app().await;
+    let page = send(&app, Request::get("/").body(Body::empty()).unwrap())
+        .await
+        .reloadable(&app);
+    page.component("Dashboard")
+        .missing("stats")
+        .missing("activity");
+
+    // The "stats" group also holds the rescued `forecast`, which a reload
+    // never has, so ask for `stats` on its own.
+    page.reload_only(&["stats"])
+        .await
+        .scope("stats", |stats| {
+            stats
+                .equals("contacts", 24)
+                .equals("posts", 150)
+                .equals("players", 40)
+        })
+        .missing("activity")
+        .missing("contactsCount");
+
+    page.load_deferred_groups(&["activity"])
+        .await
+        .missing("stats")
+        .has_count("activity", 4)
+        .contains("activity", "Grace Hopper scored 87 points");
+}
+
+#[tokio::test]
+async fn partial_reloads_only_compute_what_they_name() {
+    let app = app().await;
+    let page = send(&app, inertia("GET", "/live").body(Body::empty()).unwrap())
+        .await
+        .reloadable(&app);
+    page.component("Live").has("loadedAt").missing("report");
+
+    page.reload_only(&["report"])
+        .await
+        .has_count_in("report.rows", 1..=5)
+        .first("report.rows", |row| {
+            row.equals("region", "eu-west")
+                .satisfies("errors", |errors: u64| errors < 100)
+                .etc()
+        })
+        .missing("metrics")
+        .missing("loadedAt")
+        // An `always` prop comes along regardless.
+        .has("serverTime");
+
+    page.reload_except(&["metrics"])
+        .await
+        .missing("metrics")
+        .has("loadedAt");
+}
+
+#[tokio::test]
+async fn once_props_are_shared_by_key_and_can_be_forced() {
+    let app = app().await;
+    let dashboard = send(&app, inertia("GET", "/").body(Body::empty()).unwrap()).await;
+    dashboard.page().has("tips.items");
+    assert_eq!(dashboard.json()["onceProps"]["tips"]["prop"], "tips");
+
+    // The layouts page remembers its `hints` under the dashboard's key, so a
+    // client that already has "tips" is sent nothing for it.
+    let layouts = send(
+        &app,
+        inertia("GET", "/layouts")
+            .header("X-Inertia-Except-Once-Props", "tips")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    layouts.page().component("Layouts/Index").missing("hints");
+    assert_eq!(layouts.json()["onceProps"]["tips"]["prop"], "hints");
+
+    let fresh = send(
+        &app,
+        inertia("GET", "/?fresh=true")
+            .header("X-Inertia-Except-Once-Props", "tips")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    fresh.page().has_count("tips.items", 3);
+}
+
+#[tokio::test]
+async fn big_integers_survive_the_trip_to_javascript() {
+    let page = send(
+        &app().await,
+        inertia("GET", "/").body(Body::empty()).unwrap(),
+    )
+    .await
+    .json();
+
+    assert_eq!(page["preserveBigIntegers"], true);
+    assert_eq!(
+        page["props"]["bigId"],
+        serde_json::json!({ "$bigint": omega_showcase::routes::dashboard::BIG_ID.to_string() })
+    );
+}
+
+#[tokio::test]
+async fn the_rounds_log_prepends_the_latest_round() {
+    let app = app().await;
+    let first = send(
+        &app,
+        inertia("GET", "/leaderboard").body(Body::empty()).unwrap(),
+    )
+    .await;
+    first.page().has_count("rounds", 0);
+
+    send(
+        &app,
+        form("POST", "/leaderboard/play")
+            .body(Body::from(r#"{"upto":1}"#))
+            .unwrap(),
+    )
+    .await;
+    send(
+        &app,
+        inertia("GET", "/leaderboard").body(Body::empty()).unwrap(),
+    )
+    .await
+    .page()
+    .has_count("rounds", 1)
+    .first("rounds", |round| {
+        round
+            .equals("id", 1)
+            .satisfies("points", |points: u64| points >= 60)
+            .has("best")
+            .etc()
+    });
+}
+
+#[tokio::test]
+async fn live_props_list_their_channels_and_events() {
+    let response = send(
+        &app().await,
+        inertia("GET", "/broadcasts").body(Body::empty()).unwrap(),
+    )
+    .await;
+    let page = response.page();
+    page.component("Broadcasts")
+        .has_count("market.quotes", 4)
+        .each("market.quotes", |quote| {
+            quote
+                .has("symbol")
+                .satisfies("price", |cents: u64| cents >= 100)
+                .equals("change", 0)
+        })
+        .has("messages")
+        .has_count("inbox", 0);
+
+    let live = &page.page().metadata.live_props;
+    assert_eq!(live["market"].throttle, Some(5_000));
+    assert_eq!(
+        live["market"].listeners,
+        [LiveListener::new(
+            LiveChannel::public("market"),
+            ["PriceTicked"]
+        )]
+    );
+    assert_eq!(
+        live["messages"].listeners,
+        [LiveListener::new(
+            LiveChannel::public("lobby"),
+            ["MessagePosted"]
+        )]
+    );
+    // The demo user's id is 1.
+    assert_eq!(
+        live["inbox"].listeners,
+        [LiveListener::new(
+            LiveChannel::private("users.1"),
+            ["Nudged"]
+        )]
+    );
+}
+
+#[tokio::test]
+async fn chat_messages_are_validated_and_broadcast_to_others() {
+    let db = Db::seeded();
+    let mut events = db.broadcaster().subscribe();
+    let mut app = app().await;
+    app.router = app_with(db, shared_props(Config::new().version("test")));
+    // The session store belongs to the router, so sign in to the new one.
+    let signed_in = send(
+        &app,
+        form("POST", "/login")
+            .body(Body::from(
+                r#"{"email":"ferris@example.com","password":"rustacean"}"#,
+            ))
+            .unwrap(),
+    )
+    .await;
+    app.session = signed_in.session_cookie();
+
+    let empty = send(
+        &app,
+        form("POST", "/broadcasts/messages")
+            .body(Body::from(r#"{"body":"   "}"#))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(empty.header("location"), Some("/broadcasts"));
+    assert!(events.try_recv().is_err());
+
+    let socket_id = "0123456789abcdef0123456789abcdef";
+    send(
+        &app,
+        form("POST", "/broadcasts/messages")
+            .header("X-Socket-Id", socket_id)
+            .body(Body::from(r#"{"body":"Hello, lobby"}"#))
+            .unwrap(),
+    )
+    .await;
+    let event = events.try_recv().expect("a broadcast");
+    assert_eq!(event.channel, LiveChannel::public("lobby"));
+    assert_eq!(event.event, "MessagePosted");
+    let envelope = &event.payload["__inertia"];
+    assert_eq!(envelope["socketId"], socket_id);
+    let messages = envelope["props"]["messages"].as_array().unwrap();
+    assert_eq!(messages.last().unwrap()["body"], "Hello, lobby");
+    assert_eq!(messages.last().unwrap()["author"], "Ferris Crab");
+}
+
+#[tokio::test]
+async fn the_event_stream_needs_a_signed_in_user() {
+    let response = send(
+        &guest(),
+        Request::get("/broadcasts/stream")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert!(response.status.is_redirection());
+    assert_eq!(response.header("location"), Some("/login"));
 }

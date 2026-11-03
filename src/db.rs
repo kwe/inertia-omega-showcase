@@ -1,10 +1,12 @@
 //! An in-memory "database", seeded on startup, so the demo has no setup.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+
+use crate::broadcast::Broadcaster;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Contact {
@@ -31,6 +33,37 @@ pub struct Player {
     pub score: u64,
     pub updated: u64,
 }
+
+/// One "Play a round" on the leaderboard.
+#[derive(Clone, Debug, Serialize)]
+pub struct Round {
+    pub id: u64,
+    pub at: u64,
+    pub points: u64,
+    /// The name of the player who scored the most this round.
+    pub best: String,
+}
+
+/// A stock on the broadcasts page's ticker.
+#[derive(Clone, Debug, Serialize)]
+pub struct Quote {
+    pub symbol: &'static str,
+    /// In cents, so the demo needs no decimals.
+    pub price: u64,
+    /// In cents, since the previous tick.
+    pub change: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ChatMessage {
+    pub id: u64,
+    pub author: String,
+    pub body: String,
+    pub at: u64,
+}
+
+/// Chat messages kept, newest last.
+pub const MAX_MESSAGES: usize = 12;
 
 /// A signed-in user, as the pages see it.
 #[derive(Clone, Debug, Serialize)]
@@ -61,12 +94,21 @@ struct Tables {
     next_contact_id: u64,
     posts: Vec<Post>,
     players: Vec<Player>,
+    latest_round: Option<Round>,
+    quotes: Vec<Quote>,
+    ticks: u64,
+    messages: Vec<ChatMessage>,
+    next_message_id: u64,
+    /// When each user was nudged, newest last.
+    nudges: HashMap<u64, Vec<u64>>,
+    /// Users with a nudge on its way, so a user can't queue up many.
+    pending_nudges: HashSet<u64>,
     rng: u64,
 }
 
-/// Shared application state.
+/// Shared application state: the tables, and the broadcaster for live props.
 #[derive(Clone)]
-pub struct Db(Arc<Mutex<Tables>>);
+pub struct Db(Arc<Mutex<Tables>>, Broadcaster);
 
 const FIRST: [&str; 16] = [
     "Ada",
@@ -182,7 +224,43 @@ impl Db {
             });
         }
 
-        Self(Arc::new(Mutex::new(tables)))
+        for (symbol, price) in [
+            ("FERR", 4_200),
+            ("CRAB", 1_337),
+            ("RUST", 9_900),
+            ("AXUM", 2_750),
+        ] {
+            tables.quotes.push(Quote {
+                symbol,
+                price,
+                change: 0,
+            });
+        }
+
+        for (author, body) in [
+            (
+                "Ada Lovelace",
+                "Open this page in a second tab, then post here.",
+            ),
+            (
+                "Grace Hopper",
+                "The other tab gets the message without a reload.",
+            ),
+        ] {
+            tables.next_message_id += 1;
+            tables.messages.push(ChatMessage {
+                id: tables.next_message_id,
+                author: author.to_owned(),
+                body: body.to_owned(),
+                at: now_millis(),
+            });
+        }
+
+        Self(Arc::new(Mutex::new(tables)), Broadcaster::default())
+    }
+
+    pub fn broadcaster(&self) -> &Broadcaster {
+        &self.1
     }
 
     fn lock(&self) -> MutexGuard<'_, Tables> {
@@ -354,6 +432,7 @@ impl Db {
         let mut tables = self.lock();
         let round = now_millis();
         let mut changed = Vec::new();
+        let (mut total, mut best) = (0, (0, String::new()));
         for _ in 0..6 {
             let roll = tables.next_random();
             let index = (roll % tables.players.len() as u64) as usize;
@@ -362,8 +441,82 @@ impl Db {
             player.score += points;
             player.updated = round;
             changed.push(player.id);
+            total += points;
+            if points > best.0 {
+                best = (points, player.name.clone());
+            }
         }
+        let id = tables.latest_round.as_ref().map_or(1, |round| round.id + 1);
+        tables.latest_round = Some(Round {
+            id,
+            at: round,
+            points: total,
+            best: best.1,
+        });
         changed
+    }
+
+    pub fn latest_round(&self) -> Option<Round> {
+        self.lock().latest_round.clone()
+    }
+
+    // Broadcasts
+
+    pub fn market(&self) -> (u64, Vec<Quote>) {
+        let tables = self.lock();
+        (tables.ticks, tables.quotes.clone())
+    }
+
+    /// Move every price a little, as a market feed would.
+    pub fn tick_market(&self) -> u64 {
+        let mut tables = self.lock();
+        tables.ticks += 1;
+        for index in 0..tables.quotes.len() {
+            let roll = tables.next_random();
+            let quote = &mut tables.quotes[index];
+            let change = (roll % 101) as i64 - 50;
+            let price = quote.price.saturating_add_signed(change).max(100);
+            quote.change = price as i64 - quote.price as i64;
+            quote.price = price;
+        }
+        tables.ticks
+    }
+
+    pub fn messages(&self) -> Vec<ChatMessage> {
+        self.lock().messages.clone()
+    }
+
+    pub fn post_message(&self, author: &str, body: &str) -> Vec<ChatMessage> {
+        let mut tables = self.lock();
+        tables.next_message_id += 1;
+        let message = ChatMessage {
+            id: tables.next_message_id,
+            author: author.to_owned(),
+            body: body.to_owned(),
+            at: now_millis(),
+        };
+        tables.messages.push(message);
+        let excess = tables.messages.len().saturating_sub(MAX_MESSAGES);
+        tables.messages.drain(..excess);
+        tables.messages.clone()
+    }
+
+    pub fn nudges(&self, user: u64) -> Vec<u64> {
+        self.lock().nudges.get(&user).cloned().unwrap_or_default()
+    }
+
+    /// Start a nudge, unless one is already on its way.
+    pub fn begin_nudge(&self, user: u64) -> bool {
+        self.lock().pending_nudges.insert(user)
+    }
+
+    pub fn finish_nudge(&self, user: u64) {
+        let mut tables = self.lock();
+        tables.pending_nudges.remove(&user);
+        let nudges = tables.nudges.entry(user).or_default();
+        nudges.push(now_millis());
+        let excess = nudges.len().saturating_sub(5);
+        nudges.drain(..excess);
     }
 
     /// A pseudo-random number for live metrics.
