@@ -1,15 +1,15 @@
 //! Sign in, register and sign out. The session work is in `crate::auth`.
 
-use axum::Json;
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
+use axum::{Extension, Json};
 use inertia::{Inertia, ValidationErrors, props};
 use serde::Deserialize;
 use tower_sessions::Session;
 
 use super::contacts::is_email;
 use crate::auth::{self, DEMO_EMAIL, DEMO_PASSWORD};
-use crate::db::Db;
+use crate::db::{Db, User};
 
 const MAX_NAME: usize = 100;
 const MAX_EMAIL: usize = 254;
@@ -187,10 +187,18 @@ fn validate_registration(db: &Db, form: &RegisterForm, email: &str) -> Validatio
 
 /// `POST /logout`. Also clears the browser history, so encrypted pages such
 /// as the vault can't be brought back with the back button.
-pub async fn logout(inertia: Inertia, session: Session) -> Response {
+pub async fn logout(
+    inertia: Inertia,
+    session: Session,
+    State(db): State<Db>,
+    Extension(user): Extension<User>,
+) -> Response {
     if let Err(error) = auth::logout(&session).await {
         return auth::session_error(error);
     }
+    // Close the user's live props streams, which would otherwise keep
+    // delivering their private channel.
+    db.broadcaster().signed_out(user.id);
     inertia.clear_history();
     inertia.flash("toast", "You've been signed out.");
 

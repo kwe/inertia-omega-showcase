@@ -6,6 +6,7 @@ use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use inertia::testing::AssertablePage;
 use inertia::{Config, LiveChannel, LiveListener};
+use omega_showcase::broadcast::Signal;
 use omega_showcase::db::Db;
 use omega_showcase::{app_with, shared_props};
 use serde_json::Value;
@@ -1041,7 +1042,9 @@ async fn chat_messages_are_validated_and_broadcast_to_others() {
             .unwrap(),
     )
     .await;
-    let event = events.try_recv().expect("a broadcast");
+    let Ok(Signal::Message(event)) = events.try_recv() else {
+        panic!("expected a broadcast message");
+    };
     assert_eq!(event.channel, LiveChannel::public("lobby"));
     assert_eq!(event.event, "MessagePosted");
     let envelope = &event.payload["__inertia"];
@@ -1062,4 +1065,59 @@ async fn the_event_stream_needs_a_signed_in_user() {
     .await;
     assert!(response.status.is_redirection());
     assert_eq!(response.header("location"), Some("/login"));
+}
+
+#[tokio::test]
+async fn signing_out_ends_the_users_event_streams() {
+    let db = Db::seeded();
+    let mut events = db.broadcaster().subscribe();
+    let mut app = app().await;
+    app.router = app_with(db, shared_props(Config::new().version("test")));
+    let signed_in = send(
+        &app,
+        form("POST", "/login")
+            .body(Body::from(
+                r#"{"email":"ferris@example.com","password":"rustacean"}"#,
+            ))
+            .unwrap(),
+    )
+    .await;
+    app.session = signed_in.session_cookie();
+
+    let mut request = Request::get("/broadcasts/stream")
+        .header(header::ACCEPT, "text/event-stream")
+        .body(Body::empty())
+        .unwrap();
+    request.headers_mut().append(
+        header::COOKIE,
+        app.session.clone().unwrap().parse().unwrap(),
+    );
+    let stream = app.router.clone().oneshot(request).await.unwrap();
+    assert_eq!(stream.status(), StatusCode::OK);
+    let mut body = stream.into_body();
+    let hello = body.frame().await.unwrap().unwrap().into_data().unwrap();
+    assert!(String::from_utf8_lossy(&hello).starts_with("event: connected"));
+
+    send(&app, form("POST", "/logout").body(Body::empty()).unwrap()).await;
+    assert!(matches!(events.try_recv(), Ok(Signal::SignedOut(1))));
+
+    // The stream ends, rather than waiting for its next event.
+    let rest = tokio::time::timeout(std::time::Duration::from_secs(2), body.collect()).await;
+    assert!(rest.is_ok(), "the event stream should end on sign-out");
+}
+
+#[tokio::test]
+async fn the_event_stream_isnt_remembered_as_where_a_guest_was_going() {
+    let app = guest();
+    let stream = send(
+        &app,
+        Request::get("/broadcasts/stream")
+            .header(header::ACCEPT, "text/event-stream")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(stream.header("location"), Some("/login"));
+    // Nothing was stored, so the guest gets no session cookie.
+    assert_eq!(stream.session_cookie(), None);
 }

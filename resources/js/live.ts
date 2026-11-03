@@ -22,7 +22,7 @@ const handlers = new Map<string, Set<LiveEventHandler>>()
 const statusCallbacks = new Set<(connected: boolean) => void>()
 
 function open() {
-  if (source) return
+  if (source && source.readyState !== EventSource.CLOSED) return
   source = new EventSource('/broadcasts/stream')
   source.addEventListener('connected', (event) => {
     socketId = JSON.parse((event as MessageEvent<string>).data).socketId
@@ -32,8 +32,11 @@ function open() {
     const message: Message = JSON.parse(event.data)
     handlers.get(key(message.channel, message.event))?.forEach((handler) => handler(message.payload))
   }
-  // EventSource reconnects by itself. Inertia refreshes every live prop once
-  // it's back, so events missed in between don't leave stale data.
+  // EventSource reconnects by itself, and the server ends each stream now
+  // and then so it signs in again. Inertia refreshes every live prop once
+  // it's back, so events missed in between don't leave stale data. When the
+  // reconnect is refused (signed out), the source closes for good, and the
+  // next subscription opens a new one.
   source.onerror = () => {
     socketId = null
     statusCallbacks.forEach((callback) => callback(false))

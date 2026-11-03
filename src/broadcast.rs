@@ -7,10 +7,14 @@
 //! listen for them.
 //!
 //! Private channels are authorized on the server: a user only receives
-//! `users.{their id}`. Every connection gets a socket id, which Inertia sends
-//! back as `X-Socket-Id`, so an event can skip the tab that caused it.
+//! `users.{their id}`. A stream ends when its user signs out, and after
+//! `MAX_LIFETIME` in any case, so the browser reconnects through the sign-in
+//! check and an expired session stops receiving. Every connection gets a
+//! socket id, which Inertia sends back as `X-Socket-Id`, so an event can skip
+//! the tab that caused it.
 
 use std::convert::Infallible;
+use std::time::Duration;
 
 use axum::Extension;
 use axum::extract::State;
@@ -26,9 +30,13 @@ use tokio_stream::{Stream, StreamExt};
 
 use crate::db::{Db, User};
 
-/// Events a slow connection can fall behind by before it skips some. Live
-/// props recover from a skipped event at the next one.
+/// Events a slow connection can fall behind by. One that falls further
+/// behind is closed, and the browser reconnects and reloads every live prop.
 const BUFFER: usize = 64;
+
+/// How long a stream lasts before the browser has to reconnect, which signs
+/// it in again.
+const MAX_LIFETIME: Duration = Duration::from_secs(5 * 60);
 
 /// One broadcast event, as the browser receives it.
 #[derive(Clone, Debug, Serialize)]
@@ -38,8 +46,16 @@ pub struct Message {
     pub payload: Value,
 }
 
+/// What goes through the broadcaster: events for browsers, and sign-outs,
+/// which end that user's streams.
+#[derive(Clone, Debug)]
+pub enum Signal {
+    Message(Message),
+    SignedOut(u64),
+}
+
 #[derive(Clone)]
-pub struct Broadcaster(broadcast::Sender<Message>);
+pub struct Broadcaster(broadcast::Sender<Signal>);
 
 impl Default for Broadcaster {
     fn default() -> Self {
@@ -51,11 +67,17 @@ impl Broadcaster {
     /// Send an event to everyone listening on the channel. Nobody listening
     /// is fine: the event is dropped.
     pub fn send(&self, channel: LiveChannel, event: &str, payload: Value) {
-        let _ = self.0.send(Message {
+        let _ = self.0.send(Signal::Message(Message {
             channel,
             event: event.to_owned(),
             payload,
-        });
+        }));
+    }
+
+    /// End every stream of this user. Ones from browsers still signed in
+    /// reconnect straight away.
+    pub fn signed_out(&self, user: u64) {
+        let _ = self.0.send(Signal::SignedOut(user));
     }
 
     /// Whether any browser is connected, so background work can idle.
@@ -63,7 +85,7 @@ impl Broadcaster {
         self.0.receiver_count() > 0
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<Message> {
+    pub fn subscribe(&self) -> broadcast::Receiver<Signal> {
         self.0.subscribe()
     }
 }
@@ -106,21 +128,32 @@ pub async fn stream(
         .data(json!({ "socketId": socket_id }).to_string());
 
     let mine = user_channel(&user);
-    let events = BroadcastStream::new(db.broadcaster().subscribe()).filter_map(move |message| {
-        // A lagged connection skips what it missed rather than closing.
-        let message = message.ok()?;
-        let allowed = match message.channel.kind {
-            ChannelType::Public => true,
-            _ => message.channel == mine,
-        };
-        allowed.then(|| {
-            Event::default()
-                .json_data(&message)
-                .expect("a broadcast message should serialize")
+    let events = BroadcastStream::new(db.broadcaster().subscribe())
+        // `None` ends the stream: on a sign-out, and when the connection
+        // lagged, since a skipped event could leave a prop stale. Inertia
+        // reloads every live prop once the browser has reconnected.
+        .map_while(move |signal| match signal {
+            Ok(Signal::Message(message)) => Some(Some(message)),
+            Ok(Signal::SignedOut(id)) if id == user.id => None,
+            Ok(Signal::SignedOut(_)) => Some(None),
+            Err(_lagged) => None,
         })
-    });
+        .filter_map(move |message| {
+            let message = message?;
+            let allowed = match message.channel.kind {
+                ChannelType::Public => true,
+                _ => message.channel == mine,
+            };
+            allowed.then(|| {
+                Event::default()
+                    .json_data(&message)
+                    .expect("a broadcast message should serialize")
+            })
+        });
 
-    Sse::new(tokio_stream::once(hello).chain(events).map(Ok)).keep_alive(KeepAlive::default())
+    let stream = tokio_stream::once(hello).chain(events);
+    let stream = futures_util::StreamExt::take_until(stream, tokio::time::sleep(MAX_LIFETIME));
+    Sse::new(stream.map(Ok)).keep_alive(KeepAlive::default())
 }
 
 #[cfg(test)]

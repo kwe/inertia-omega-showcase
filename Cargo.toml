@@ -13,6 +13,7 @@ argon2 = "0.6"
 axum = "0.8"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+futures-util = { version = "0.3", default-features = false }
 tower-sessions = { version = "0.15", features = ["memory-store"] }
 tower-http = { version = "0.7", features = ["fs", "set-header", "trace"] }
 serde = { version = "1", features = ["derive"] }

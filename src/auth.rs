@@ -18,7 +18,7 @@ use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use axum::extract::{Request, State};
-use axum::http::{Method, StatusCode};
+use axum::http::{Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use inertia::Inertia;
@@ -145,7 +145,12 @@ pub async fn require_user(session: Session, request: Request, next: Next) -> Res
         .headers()
         .get("purpose")
         .is_some_and(|purpose| purpose == "prefetch");
-    if request.method() == Method::GET && !prefetch {
+    // Nor the live props event stream, which reconnects by itself.
+    let event_stream = request
+        .headers()
+        .get(header::ACCEPT)
+        .is_some_and(|accept| accept.as_bytes().starts_with(b"text/event-stream"));
+    if request.method() == Method::GET && !prefetch && !event_stream {
         let path = request
             .uri()
             .path_and_query()

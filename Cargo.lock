@@ -823,6 +823,7 @@ dependencies = [
  "argon2",
  "async-trait",
  "axum",
+ "futures-util",
  "http-body-util",
  "inertia-omega",
  "rand 0.10.3",
