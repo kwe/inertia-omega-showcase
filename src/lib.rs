@@ -161,7 +161,7 @@ pub fn inertia_config() -> Config {
 </body>
 </html>"#,
                 assets = vite.tags(),
-                head = view.head,
+                head = view.head.join("\n    "),
                 body = view.body,
             )
         })
