@@ -15,8 +15,8 @@
 use std::sync::LazyLock;
 
 use argon2::Argon2;
-use argon2::password_hash::rand_core::OsRng;
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::phc::PasswordHash;
+use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use axum::extract::{Request, State};
 use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
@@ -35,9 +35,9 @@ const USER_KEY: &str = "auth.user_id";
 const INTENDED_KEY: &str = "auth.intended";
 
 pub fn hash_password(password: &str) -> String {
-    let salt = SaltString::generate(&mut OsRng);
+    // Argon2 draws a fresh random salt from the OS for every hash.
     Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .expect("Argon2 with default parameters should hash any password")
         .to_string()
 }

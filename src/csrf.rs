@@ -13,7 +13,7 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use inertia::{Inertia, props};
-use rand::RngCore;
+use rand::Rng;
 
 pub const COOKIE: &str = "XSRF-TOKEN";
 pub const HEADER: &str = "x-xsrf-token";

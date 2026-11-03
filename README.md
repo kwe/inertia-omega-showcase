@@ -8,8 +8,8 @@ The server side is [inertia-omega](https://github.com/inertiajs/inertia-omega), 
 
 | | |
 | --- | --- |
-| Backend | Axum 0.8, [inertia-omega](https://github.com/inertiajs/inertia-omega) (pinned to `6667d8d`), tower-sessions, argon2 |
-| Frontend | React 19, `@inertiajs/react` 3.9, TypeScript, Tailwind CSS 4 |
+| Backend | Axum 0.8, [inertia-omega](https://github.com/inertiajs/inertia-omega) (pinned to `c27d766`), tower-sessions, argon2 |
+| Frontend | React 19, `@inertiajs/react` 3.11, TypeScript 7, Tailwind CSS 4 |
 | Build | Vite 8 with `@inertiajs/vite` (page resolution and SSR) |
 | Data | Seeded in memory on startup, so there's nothing to set up. Restarting resets it, accounts included. |
 
@@ -32,7 +32,7 @@ The server side is [inertia-omega](https://github.com/inertiajs/inertia-omega), 
 
 ## Running it
 
-You need Rust 1.88 or newer and Node 20.19 or newer.
+You need Rust 1.99 or newer (inertia-omega now requires it) and Node 20.19 or newer.
 
 ```bash
 npm install
