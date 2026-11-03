@@ -432,7 +432,7 @@ impl Db {
         let mut tables = self.lock();
         let round = now_millis();
         let mut changed = Vec::new();
-        let (mut total, mut best) = (0, (0, String::new()));
+        let mut scored: HashMap<u64, (u64, String)> = HashMap::new();
         for _ in 0..6 {
             let roll = tables.next_random();
             let index = (roll % tables.players.len() as u64) as usize;
@@ -441,17 +441,25 @@ impl Db {
             player.score += points;
             player.updated = round;
             changed.push(player.id);
-            total += points;
-            if points > best.0 {
-                best = (points, player.name.clone());
-            }
+            scored
+                .entry(player.id)
+                .or_insert_with(|| (0, player.name.clone()))
+                .0 += points;
         }
+        // A player can score more than once in a round, so the best is the
+        // one with the most points in total. Ties go to the lowest id.
+        let total = scored.values().map(|(points, _)| points).sum();
+        let best = scored
+            .into_iter()
+            .max_by(|(a_id, (a, _)), (b_id, (b, _))| a.cmp(b).then(b_id.cmp(a_id)))
+            .map(|(_, (_, name))| name)
+            .unwrap_or_default();
         let id = tables.latest_round.as_ref().map_or(1, |round| round.id + 1);
         tables.latest_round = Some(Round {
             id,
             at: round,
             points: total,
-            best: best.1,
+            best,
         });
         changed
     }
@@ -486,7 +494,9 @@ impl Db {
         self.lock().messages.clone()
     }
 
-    pub fn post_message(&self, author: &str, body: &str) -> Vec<ChatMessage> {
+    /// Add a message, and hand the new list to `publish` before anyone else
+    /// can post, so broadcasts of the list go out in the order it changed.
+    pub fn post_message(&self, author: &str, body: &str, publish: impl FnOnce(&[ChatMessage])) {
         let mut tables = self.lock();
         tables.next_message_id += 1;
         let message = ChatMessage {
@@ -498,7 +508,7 @@ impl Db {
         tables.messages.push(message);
         let excess = tables.messages.len().saturating_sub(MAX_MESSAGES);
         tables.messages.drain(..excess);
-        tables.messages.clone()
+        publish(&tables.messages);
     }
 
     pub fn nudges(&self, user: u64) -> Vec<u64> {
@@ -560,5 +570,26 @@ mod tests {
 
         db.clear_login_failures("a@example.com");
         assert!(db.begin_login_attempt("a@example.com").is_ok());
+    }
+
+    #[test]
+    fn the_best_player_of_a_round_has_the_most_points_in_total() {
+        let db = Db::seeded();
+        for _ in 0..50 {
+            let before: HashMap<u64, u64> = db.players().iter().map(|p| (p.id, p.score)).collect();
+            db.play_round();
+            let gains: Vec<(String, u64)> = db
+                .players()
+                .into_iter()
+                .map(|p| (p.name, p.score - before[&p.id]))
+                .collect();
+            let round = db.latest_round().unwrap();
+            let most = gains.iter().map(|(_, gain)| *gain).max().unwrap();
+            assert_eq!(
+                round.points,
+                gains.iter().map(|(_, gain)| gain).sum::<u64>()
+            );
+            assert!(gains.contains(&(round.best.clone(), most)));
+        }
     }
 }

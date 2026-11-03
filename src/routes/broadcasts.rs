@@ -107,17 +107,18 @@ pub async fn post_message(
         return inertia::redirect("/broadcasts").into_response();
     }
 
-    let messages = db.post_message(&user.name, body);
-    match inertia::broadcast_props(
+    // Broadcast while the list is locked: listening tabs write the list as
+    // sent, so an older list must never go out after a newer one.
+    let broadcaster = db.broadcaster().clone();
+    db.post_message(&user.name, body, |messages| match inertia::broadcast_props(
         json!({ "author": user.name }),
         json!({ "messages": messages }),
     ) {
         Ok(payload) => {
-            db.broadcaster()
-                .send(lobby(), "MessagePosted", to_others(payload, &headers));
+            broadcaster.send(lobby(), "MessagePosted", to_others(payload, &headers));
         }
         Err(error) => tracing::error!(%error, "the chat broadcast didn't serialize"),
-    }
+    });
 
     // This tab gets the new list from the redirect instead.
     inertia::redirect("/broadcasts").into_response()
