@@ -6,6 +6,7 @@
 //! - `csrf`: the `XSRF-TOKEN` cookie and its check on every form submission.
 //! - `session`: an in-memory session store that forgets expired sessions.
 //! - `auth`: sign-in sessions, password hashing and the auth middleware.
+//! - `broadcast`: the in-process broadcaster behind live props.
 
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
@@ -21,6 +22,7 @@ use tower_sessions::cookie::time::Duration;
 use tower_sessions::{Expiry, SessionManagerLayer};
 
 pub mod auth;
+pub mod broadcast;
 pub mod csrf;
 pub mod db;
 pub mod routes;
@@ -51,7 +53,9 @@ const SECURITY_HEADERS: [(HeaderName, &str); 4] = [
 
 /// The application, with its routes and middleware.
 pub fn app() -> Router {
-    app_with(Db::seeded(), inertia_config())
+    let db = Db::seeded();
+    routes::broadcasts::spawn_market(db.clone());
+    app_with(db, inertia_config())
 }
 
 pub fn app_with(db: Db, config: Config) -> Router {
@@ -85,6 +89,10 @@ pub fn app_with(db: Db, config: Config) -> Router {
         .route("/leaderboard", get(leaderboard::index))
         .route("/leaderboard/play", post(leaderboard::play))
         .route("/live", get(live::index))
+        .route("/broadcasts", get(broadcasts::index))
+        .route("/broadcasts/stream", get(crate::broadcast::stream))
+        .route("/broadcasts/messages", post(broadcasts::post_message))
+        .route("/broadcasts/nudge", post(broadcasts::nudge))
         .route("/redirects", get(redirects::index))
         .route("/redirects/back", post(redirects::back))
         .route("/redirects/see-other", put(redirects::see_other))

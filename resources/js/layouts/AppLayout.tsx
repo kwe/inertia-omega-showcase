@@ -8,6 +8,7 @@ const nav = [
   { href: '/feed', label: 'Feed', hint: 'Infinite scroll' },
   { href: '/leaderboard', label: 'Leaderboard', hint: 'Merge · match on id' },
   { href: '/live', label: 'Live', hint: 'Polling · optional props' },
+  { href: '/broadcasts', label: 'Broadcasts', hint: 'Live props · channels' },
   { href: '/redirects', label: 'Redirects', hint: '303 · 409 · fragments' },
   { href: '/vault', label: 'Vault', hint: 'History encryption' },
   { href: '/layouts', label: 'Layouts', hint: 'Persistent · nested' },

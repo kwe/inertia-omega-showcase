@@ -3,7 +3,12 @@ import { Card, PageHeader, time } from '@/components/ui'
 import AppLayout from '@/layouts/AppLayout'
 import SectionLayout from '@/layouts/SectionLayout'
 
-function LayoutsIndex({ renderedAt }: { renderedAt: number }) {
+interface Props {
+  renderedAt: number
+  hints: { generatedAt: number; items: string[] }
+}
+
+function LayoutsIndex({ renderedAt, hints }: Props) {
   return (
     <>
       <Head title="Layouts" />
@@ -19,6 +24,20 @@ function LayoutsIndex({ renderedAt }: { renderedAt: number }) {
           <code>AppLayout</code>.
         </p>
       </Card>
+      <div className="mt-4">
+        <Card title="Hints" feature="once_as('tips')">
+          <p className="mb-3 text-xs text-stone-500">
+            The dashboard's tips, remembered under the same key. Visit the dashboard first and this page skips the
+            prop: the timestamp, <strong className="tabular-nums">{time(hints.generatedAt)}</strong>, matches the
+            dashboard's.
+          </p>
+          <ul className="space-y-1 text-sm">
+            {hints.items.map((hint) => (
+              <li key={hint}>💡 {hint}</li>
+            ))}
+          </ul>
+        </Card>
+      </div>
     </>
   )
 }
