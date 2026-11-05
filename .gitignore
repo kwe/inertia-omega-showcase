@@ -4,3 +4,6 @@
 /public/hot
 /bootstrap/ssr
 .DS_Store
+
+# Screenshots from local browser checks
+shots/
